@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { pdf } from "@react-pdf/renderer";
+import { renderToBuffer } from "@react-pdf/renderer";
 import React from "react";
 import { auth } from "@/auth";
 import prisma from "@/lib/db";
@@ -54,24 +54,9 @@ export async function GET(
       },
       receipt,
     });
-    const raw = await pdf(doc as Parameters<typeof pdf>[0]).toBuffer();
-
-    let buffer: Buffer;
-    if (Buffer.isBuffer(raw)) {
-      buffer = raw;
-    } else if (raw instanceof Uint8Array) {
-      buffer = Buffer.from(raw);
-    } else if (raw instanceof ArrayBuffer) {
-      buffer = Buffer.from(raw);
-    } else if (typeof Blob !== "undefined" && raw instanceof Blob) {
-      buffer = Buffer.from(await raw.arrayBuffer());
-    } else if (raw instanceof ReadableStream) {
-      buffer = Buffer.from(await new Response(raw).arrayBuffer());
-    } else if (ArrayBuffer.isView(raw)) {
-      buffer = Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength);
-    } else {
-      return new NextResponse("Formato de PDF não suportado", { status: 500 });
-    }
+    const buffer = await renderToBuffer(
+      doc as Parameters<typeof renderToBuffer>[0],
+    );
 
     if (!buffer.byteLength) {
       return new NextResponse("PDF vazio", { status: 500 });
