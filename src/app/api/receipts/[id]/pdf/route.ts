@@ -67,16 +67,18 @@ export async function GET(
       buffer = Buffer.from(await raw.arrayBuffer());
     } else if (raw instanceof ReadableStream) {
       buffer = Buffer.from(await new Response(raw).arrayBuffer());
+    } else if (ArrayBuffer.isView(raw)) {
+      buffer = Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength);
     } else {
-      const bin = raw as ArrayBufferView;
-      buffer = Buffer.from(bin.buffer, bin.byteOffset, bin.byteLength);
+      return new NextResponse("Formato de PDF não suportado", { status: 500 });
     }
 
     if (!buffer.byteLength) {
       return new NextResponse("PDF vazio", { status: 500 });
     }
 
-    return new NextResponse(buffer, {
+    // TS 5.9+ generic Buffer/Uint8Array don't match BodyInit in Next's types; runtime is valid.
+    return new NextResponse(buffer as unknown as BodyInit, {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
