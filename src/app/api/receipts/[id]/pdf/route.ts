@@ -6,6 +6,10 @@ import prisma from "@/lib/db";
 import { ReceiptPdfDocument } from "@/pdf/receipt-document";
 import { verifyReceiptPdfAccess } from "@/lib/receipt-pdf-token";
 
+/** @react-pdf/renderer precisa do runtime Node (fs, Buffer, layout). Edge quebra o PDF. */
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 export async function GET(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
@@ -40,35 +44,48 @@ export async function GET(
     return new NextResponse("Configuração incompleta", { status: 500 });
   }
 
-  const doc = React.createElement(ReceiptPdfDocument, {
-    business: {
-      legalName: business.legalName,
-      cnpj: business.cnpj,
-      phone: business.phone,
-      email: business.email,
-    },
-    receipt,
-  });
-  const raw = await pdf(doc as Parameters<typeof pdf>[0]).toBuffer();
-  let bytes: Uint8Array;
-  if (raw instanceof ReadableStream) {
-    bytes = new Uint8Array(await new Response(raw).arrayBuffer());
-  } else {
-    const bin = raw as unknown as ArrayBuffer | ArrayBufferView;
-    bytes =
-      bin instanceof ArrayBuffer
-        ? new Uint8Array(bin)
-        : new Uint8Array(bin.buffer, bin.byteOffset, bin.byteLength);
+  try {
+    const doc = React.createElement(ReceiptPdfDocument, {
+      business: {
+        legalName: business.legalName,
+        cnpj: business.cnpj,
+        phone: business.phone,
+        email: business.email,
+      },
+      receipt,
+    });
+    const raw = await pdf(doc as Parameters<typeof pdf>[0]).toBuffer();
+
+    let buffer: Buffer;
+    if (Buffer.isBuffer(raw)) {
+      buffer = raw;
+    } else if (raw instanceof Uint8Array) {
+      buffer = Buffer.from(raw);
+    } else if (raw instanceof ArrayBuffer) {
+      buffer = Buffer.from(raw);
+    } else if (typeof Blob !== "undefined" && raw instanceof Blob) {
+      buffer = Buffer.from(await raw.arrayBuffer());
+    } else if (raw instanceof ReadableStream) {
+      buffer = Buffer.from(await new Response(raw).arrayBuffer());
+    } else {
+      const bin = raw as ArrayBufferView;
+      buffer = Buffer.from(bin.buffer, bin.byteOffset, bin.byteLength);
+    }
+
+    if (!buffer.byteLength) {
+      return new NextResponse("PDF vazio", { status: 500 });
+    }
+
+    return new NextResponse(buffer, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `inline; filename="recibo-${receipt.id}.pdf"`,
+        "Cache-Control": "private, no-store",
+      },
+    });
+  } catch (e) {
+    console.error("[api/receipts/pdf]", e);
+    return new NextResponse("Erro ao gerar PDF", { status: 500 });
   }
-
-  const body = new ArrayBuffer(bytes.byteLength);
-  new Uint8Array(body).set(bytes);
-
-  return new NextResponse(body, {
-    headers: {
-      "Content-Type": "application/pdf",
-      "Content-Disposition": `inline; filename="recibo-${receipt.id}.pdf"`,
-      "Cache-Control": "private, no-store",
-    },
-  });
 }

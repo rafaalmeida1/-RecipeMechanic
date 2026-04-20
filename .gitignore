@@ -31,6 +31,8 @@ yarn-error.log*
 .env
 .env*.local
 
+/scripts
+/apagar_depois_de_importar_para_dentro_do_banco
 # vercel
 .vercel
 
@@ -40,3 +42,7 @@ next-env.d.ts
 
 # prisma
 /prisma/migrations/**/migration_lock.toml
+
+# Recibos legados (PDF/XLSX) — não versionar; manter só .gitkeep
+/apagar_depois_de_importar_para_dentro_do_banco/*
+!/apagar_depois_de_importar_para_dentro_do_banco/.gitkeep

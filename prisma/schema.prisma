@@ -103,6 +103,8 @@ model Vehicle {
 
 model Receipt {
   id               String         @id @default(cuid())
+  /// Chave idempotente p/ importação legada (ex.: hash semântico). `null` = recibo normal do app.
+  importSourceKey  String?        @unique
   status           ReceiptStatus  @default(DRAFT)
   vehicleId        String
   vehicle          Vehicle        @relation(fields: [vehicleId], references: [id], onDelete: Cascade)

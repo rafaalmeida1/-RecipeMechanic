@@ -11,7 +11,8 @@
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "import:receipts": "tsx scripts/import-legacy-receipts.ts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.6",
@@ -53,7 +54,10 @@
     "eslint-config-next": "^15.2.4",
     "prisma": "^6.5.0",
     "tsx": "^4.19.3",
-    "typescript": "^5"
+    "typescript": "^5",
+    "dotenv": "^16.4.7",
+    "pdf-parse": "^1.1.1",
+    "xlsx": "^0.18.5"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

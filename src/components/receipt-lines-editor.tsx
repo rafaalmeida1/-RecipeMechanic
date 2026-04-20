@@ -183,10 +183,10 @@ export function ReceiptLinesEditor({
             <Plus className="h-4 w-4" />
             Adicionar linha
           </Button>
-          <div className="flex items-center gap-2 text-sm">
-            <CircleDollarSign className="h-4 w-4 text-primary" aria-hidden />
+          <div className="flex items-center gap-2 text-base md:text-sm">
+            <CircleDollarSign className="h-4 w-4 shrink-0 text-primary" aria-hidden />
             <span className="text-muted-foreground">Total (prévia)</span>
-            <span className="text-lg font-bold tabular-nums text-foreground">
+            <span className="font-medium tabular-nums text-foreground">
               {formatCentsBRL(totalsPreview)}
             </span>
           </div>
@@ -319,7 +319,7 @@ function LineRow({
         </div>
         <div className="sm:col-span-1">
           <Label>Total</Label>
-          <div className="flex h-11 items-center rounded-md border border-input bg-background px-3 text-sm font-semibold tabular-nums text-foreground">
+          <div className="flex h-11 items-center rounded-md border border-input bg-muted/30 px-3 py-2 text-base tabular-nums text-foreground shadow-sm md:text-sm">
             {formatCentsBRL(lineTotal)}
           </div>
         </div>
