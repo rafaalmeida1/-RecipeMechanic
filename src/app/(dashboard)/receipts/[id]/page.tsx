@@ -29,6 +29,7 @@ export default async function ReceiptPage({
       <ReceiptLinesEditor
         receiptId={receipt.id}
         initialLines={receipt.lines.map((l) => ({
+          kind: l.kind,
           description: l.description,
           qty: l.qty,
           unitCents: l.unitCents,

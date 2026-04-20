@@ -3,20 +3,32 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouterWithLoading } from "@/components/navigation-progress";
 import {
-  finalizeReceipt,
-  saveReceiptDraft,
-  suggestParts,
-} from "@/server/receipts/actions";
-import { OFFLINE_SYNC_EVENT, enqueueLinesDraft } from "@/lib/offline/receipt-sync";
+  OFFLINE_SYNC_EVENT,
+  upsertOfflineBundleLines,
+  type OfflineSyncDetail,
+} from "@/lib/offline/receipt-sync";
+import { getDraftById, type BundleLine, type OutboxRecord } from "@/lib/offline/outbox";
+import { readCachedBusiness, writeCachedBusiness } from "@/lib/offline/business-cache";
+import { downloadOfflineReceiptPdf } from "@/lib/pdf/download-receipt-pdf-browser";
 import { formatCentsBRL, parseMoneyToCents } from "@/lib/money";
 import { ReceiptLineKind } from "@prisma/client";
-import { CircleDollarSign, Loader2, Plus, Trash2 } from "lucide-react";
+import { getBusinessProfileSnapshot } from "@/server/receipts/actions";
+import {
+  ArrowLeft,
+  CircleDollarSign,
+  FileDown,
+  Loader2,
+  Plus,
+  Trash2,
+  WifiOff,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { formatPlateDisplay, normalizePlate } from "@/lib/plate";
 
-export type DraftLine = {
+type DraftLine = {
   clientId: string;
   kind: ReceiptLineKind;
   description: string;
@@ -45,46 +57,112 @@ function linesSignature(lines: DraftLine[]) {
   );
 }
 
-export function ReceiptLinesEditor({
-  receiptId,
-  initialLines,
-}: {
-  receiptId: string;
-  initialLines: Array<{
-    kind: ReceiptLineKind;
-    description: string;
-    qty: number;
-    unitCents: number;
-  }>;
-}) {
+function bundleLinesFromDraft(lines: DraftLine[]): BundleLine[] {
+  return lines
+    .map((l) => {
+      const unitCents = parseMoneyToCents(l.unitMoney);
+      const qty = Number.parseInt(l.qty, 10);
+      if (
+        !l.description.trim() ||
+        unitCents === null ||
+        !Number.isFinite(qty) ||
+        qty <= 0
+      ) {
+        return null;
+      }
+      return {
+        kind: l.kind,
+        description: l.description.trim(),
+        qty,
+        unitCents,
+      };
+    })
+    .filter(Boolean) as BundleLine[];
+}
+
+export function OfflineReceiptWorkspace({ draftKey }: { draftKey: string }) {
   const router = useRouterWithLoading();
-  const [pending, startTransition] = useTransition();
-  const [backPending, startBackTransition] = useTransition();
-  const [lines, setLines] = useState<DraftLine[]>(() => {
-    if (!initialLines.length) return [newLine()];
-    return initialLines.map((l) => ({
-      clientId: Math.random().toString(36).slice(2),
-      kind: l.kind,
-      description: l.description,
-      unitMoney: (l.unitCents / 100).toFixed(2).replace(".", ","),
-      qty: String(l.qty),
-    }));
-  });
+  const [draft, setDraft] = useState<OutboxRecord | null | undefined>(undefined);
+  const [pdfPending, startPdf] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [offlineQueued, setOfflineQueued] = useState(false);
   const lastSavedSig = useRef<string | null>(null);
+
+  const reload = useCallback(() => {
+    void getDraftById(draftKey).then(setDraft);
+  }, [draftKey]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  useEffect(() => {
+    const onChange = () => reload();
+    window.addEventListener("ribeirocar-outbox-changed", onChange);
+    return () => window.removeEventListener("ribeirocar-outbox-changed", onChange);
+  }, [reload]);
+
+  useEffect(() => {
+    if (typeof navigator !== "undefined" && navigator.onLine) {
+      void getBusinessProfileSnapshot().then((b) => {
+        if (b) writeCachedBusiness(b);
+      });
+    }
+  }, []);
 
   useEffect(() => {
     const onSynced = (e: Event) => {
-      const d = (e as CustomEvent<{ kind?: string; receiptId?: string }>).detail;
-      if (d?.kind === "lines" && d.receiptId === receiptId) {
-        setOfflineQueued(false);
+      const d = (e as CustomEvent<OfflineSyncDetail>).detail;
+      if (
+        (d.kind === "bundle" || d.kind === "wizard") &&
+        d.clientDraftKey === draftKey
+      ) {
+        router.push(`/receipts/${d.receiptId}`);
       }
     };
     window.addEventListener(OFFLINE_SYNC_EVENT, onSynced);
     return () => window.removeEventListener(OFFLINE_SYNC_EVENT, onSynced);
-  }, [receiptId]);
+  }, [draftKey, router]);
+
+  const wizard = draft?.wizard;
+
+  const [lines, setLines] = useState<DraftLine[]>([newLine()]);
+  const linesInitialized = useRef(false);
+
+  useEffect(() => {
+    if (!draft || !wizard || linesInitialized.current) return;
+    const raw = draft.bundleLines ?? [];
+    linesInitialized.current = true;
+    if (!raw.length) {
+      setLines([newLine()]);
+      return;
+    }
+    setLines(
+      raw.map((l) => ({
+        clientId: Math.random().toString(36).slice(2),
+        kind: l.kind,
+        description: l.description,
+        unitMoney: (l.unitCents / 100).toFixed(2).replace(".", ","),
+        qty: String(l.qty),
+      })),
+    );
+  }, [draft, wizard]);
+
+  const persist = useCallback(async () => {
+    if (!wizard) return;
+    const sig = linesSignature(lines);
+    if (sig === lastSavedSig.current) return;
+    const bl = bundleLinesFromDraft(lines);
+    await upsertOfflineBundleLines(draftKey, bl);
+    lastSavedSig.current = sig;
+  }, [draftKey, lines, wizard]);
+
+  useEffect(() => {
+    if (!wizard) return;
+    const t = window.setTimeout(() => {
+      void persist();
+    }, 2000);
+    return () => window.clearTimeout(t);
+  }, [persist, wizard]);
 
   const totalsPreview = useMemo(() => {
     let total = 0;
@@ -97,144 +175,64 @@ export function ReceiptLinesEditor({
     return total;
   }, [lines]);
 
-  const persist = useCallback(async () => {
-    const sig = linesSignature(lines);
-    if (sig === lastSavedSig.current) return true;
+  const plateDisplay = wizard ? formatPlateDisplay(normalizePlate(wizard.plate)) : "";
 
-    const parsedLines = lines
-      .map((l) => {
-        const unitCents = parseMoneyToCents(l.unitMoney);
-        const qty = Number.parseInt(l.qty, 10);
-        if (
-          !l.description.trim() ||
-          unitCents === null ||
-          !Number.isFinite(qty) ||
-          qty <= 0
-        ) {
-          return null;
-        }
-        return {
-          kind: l.kind,
-          description: l.description.trim(),
-          qty,
-          unitCents,
-        };
-      })
-      .filter(Boolean) as Array<{
-        kind: ReceiptLineKind;
-        description: string;
-        qty: number;
-        unitCents: number;
-      }>;
+  if (draft === undefined) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Carregando rascunho…
+      </div>
+    );
+  }
 
-    setSaving(true);
-    try {
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
-        await enqueueLinesDraft({ receiptId, lines: parsedLines });
-        setOfflineQueued(true);
-        lastSavedSig.current = sig;
-        setError(null);
-        try {
-          localStorage.setItem(
-            `ribeirocar:draft:${receiptId}`,
-            JSON.stringify({ lines, savedAt: Date.now() }),
-          );
-        } catch {
-          // ignore
-        }
-        return true;
-      }
-
-      const res = await saveReceiptDraft({ receiptId, lines: parsedLines });
-      if (!res.ok) {
-        setError(res.error);
-        return false;
-      }
-      setOfflineQueued(false);
-      lastSavedSig.current = sig;
-      setError(null);
-      try {
-        localStorage.setItem(
-          `ribeirocar:draft:${receiptId}`,
-          JSON.stringify({ lines, savedAt: Date.now() }),
-        );
-      } catch {
-        // ignore
-      }
-      return true;
-    } catch {
-      try {
-        await enqueueLinesDraft({ receiptId, lines: parsedLines });
-        setOfflineQueued(true);
-        lastSavedSig.current = sig;
-        setError(
-          "Sem conexão: alterações na fila deste aparelho. Sincronizam ao voltar a internet.",
-        );
-        try {
-          localStorage.setItem(
-            `ribeirocar:draft:${receiptId}`,
-            JSON.stringify({ lines, savedAt: Date.now() }),
-          );
-        } catch {
-          // ignore
-        }
-        return true;
-      } catch {
-        setError("Erro ao salvar o rascunho.");
-        return false;
-      }
-    } finally {
-      setSaving(false);
-    }
-  }, [lines, receiptId]);
-
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      void persist();
-    }, 2000);
-    return () => window.clearTimeout(t);
-  }, [persist]);
+  if (!draft || !wizard || draft.kind === "lines") {
+    return (
+      <Card className="border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
+        Rascunho offline não encontrado neste aparelho ou a chave é inválida.
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-8">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-primary">
-            Etapa 3
+            Modo offline
           </p>
           <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
             Peças e valores
           </h1>
           <p className="max-w-lg text-sm leading-relaxed text-muted-foreground">
-            Preencha o valor de <strong className="text-foreground">uma unidade</strong>{" "}
-            antes da quantidade. O sistema soma tudo e salva o rascunho sozinho.
+            Os dados ficam neste aparelho até sincronizar. Você pode gerar um PDF de rascunho
+            para o cliente mesmo sem internet.
           </p>
         </div>
-        <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
-          {offlineQueued ? (
-            <p className="max-w-xs text-right text-[11px] text-amber-200/90">
-              Fila offline: peças guardadas neste aparelho até sincronizar.
-            </p>
-          ) : null}
-          <div className="flex items-center gap-2 rounded-lg border border-border/80 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-            {saving ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                Salvando…
-              </>
-            ) : (
-              <>
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                {offlineQueued ? "Na fila (offline)" : "Rascunho salvo"}
-              </>
-            )}
+        <div className="flex flex-col items-stretch gap-2 sm:items-end">
+          <div className="flex items-center gap-2 rounded-lg border border-amber-500/35 bg-amber-950/35 px-3 py-2 text-xs text-amber-50">
+            <WifiOff className="h-4 w-4 shrink-0" aria-hidden />
+            Pendente de sincronização
           </div>
         </div>
       </header>
 
+      <Card className="space-y-3 border-primary/10 px-4 py-3 text-sm">
+        <div className="font-medium text-foreground">{wizard.customerName}</div>
+        <div className="text-muted-foreground">
+          {wizard.vehicleLabel}
+          {plateDisplay ? (
+            <>
+              {" "}
+              · <span className="font-mono text-foreground">{plateDisplay}</span>
+            </>
+          ) : null}
+        </div>
+      </Card>
+
       <Card className="space-y-4 border-primary/10">
         {lines.map((line, idx) => (
-          <LineRow
+          <OfflineLineRow
             key={line.clientId}
             index={idx}
             line={line}
@@ -278,50 +276,46 @@ export function ReceiptLinesEditor({
           </p>
         ) : null}
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-between">
           <Button
             type="button"
-            variant="secondary"
-            loading={backPending}
-            disabled={pending || backPending}
-            onClick={() =>
-              startBackTransition(() => {
-                router.push("/");
-              })
-            }
+            variant="outline"
+            className="gap-2"
+            onClick={() => router.push("/receipts/new")}
           >
-            Voltar ao início
+            <ArrowLeft className="h-4 w-4" />
+            Novo recibo
           </Button>
           <Button
             type="button"
-            loading={pending}
-            disabled={pending || backPending}
+            className="gap-2"
+            loading={pdfPending}
+            disabled={pdfPending}
             onClick={() => {
               setError(null);
-              if (typeof navigator !== "undefined" && !navigator.onLine) {
-                setError(
-                  "É preciso estar online para finalizar o recibo. Conecte-se à internet e tente de novo.",
-                );
-                return;
-              }
-              if (offlineQueued) {
-                setError(
-                  "Sincronize primeiro as peças com o servidor (faixa “Sincronizar agora” no topo) e depois finalize.",
-                );
-                return;
-              }
-              startTransition(async () => {
-                await persist();
-                const res = await finalizeReceipt(receiptId);
-                if (!res.ok) {
-                  setError(res.error);
-                  return;
+              startPdf(async () => {
+                try {
+                  await persist();
+                  const bl = bundleLinesFromDraft(lines);
+                  if (!bl.length) {
+                    setError("Adicione ao menos uma linha válida (descrição, valor e quantidade).");
+                    return;
+                  }
+                  const cached = readCachedBusiness();
+                  await downloadOfflineReceiptPdf({
+                    wizard,
+                    bundleLines: bl,
+                    draftKey,
+                    cachedBusiness: cached,
+                  });
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : "Não foi possível gerar o PDF.");
                 }
-                router.push(`/receipts/${receiptId}/done`);
               });
             }}
           >
-            Finalizar recibo
+            {!pdfPending ? <FileDown className="h-4 w-4" aria-hidden /> : null}
+            Baixar PDF (rascunho)
           </Button>
         </div>
       </Card>
@@ -329,7 +323,7 @@ export function ReceiptLinesEditor({
   );
 }
 
-function LineRow({
+function OfflineLineRow({
   index,
   line,
   onChange,
@@ -340,19 +334,6 @@ function LineRow({
   onChange: (next: DraftLine) => void;
   onRemove: () => void;
 }) {
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  useEffect(() => {
-    const q = line.description.trim();
-    if (q.length < 2) {
-      setSuggestions([]);
-      return;
-    }
-    const t = window.setTimeout(() => {
-      void suggestParts(q).then(setSuggestions).catch(() => setSuggestions([]));
-    }, 350);
-    return () => window.clearTimeout(t);
-  }, [line.description]);
-
   const unitCents = parseMoneyToCents(line.unitMoney);
   const qty = Number.parseInt(line.qty, 10);
   const lineTotal =
@@ -407,18 +388,12 @@ function LineRow({
             id={`d-${line.clientId}`}
             value={line.description}
             onChange={(e) => onChange({ ...line, description: e.target.value })}
-            list={`suggestions-${line.clientId}`}
             placeholder={
               line.kind === ReceiptLineKind.SERVICE
                 ? "Ex.: Mão de obra, alinhamento…"
                 : "Ex.: Kit pastilha dianteira"
             }
           />
-          <datalist id={`suggestions-${line.clientId}`}>
-            {suggestions.map((s) => (
-              <option key={s} value={s} />
-            ))}
-          </datalist>
         </div>
         <div className="sm:col-span-3">
           <Label htmlFor={`u-${line.clientId}`}>Valor unitário (R$)</Label>

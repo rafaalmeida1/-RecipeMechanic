@@ -49,7 +49,36 @@ export function BrazilianDatePicker({
   className,
 }: Props) {
   const [open, setOpen] = React.useState(false);
+  /** Radix Popover gera IDs no SSR que não batem com o cliente (React 19) — só monta após hidratar. */
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => setMounted(true), []);
+
   const selected = parseIsoToLocalDate(value);
+
+  const label = selected ? (
+    format(selected, "dd/MM/yyyy", { locale: ptBR })
+  ) : (
+    "Toque para escolher a data"
+  );
+
+  if (!mounted) {
+    return (
+      <Button
+        id={id}
+        type="button"
+        variant="outline"
+        disabled={disabled}
+        className={cn(
+          "h-11 w-full justify-start px-3 text-left font-normal",
+          !selected && "text-muted-foreground",
+          className,
+        )}
+      >
+        <CalendarIcon className="mr-2 h-4 w-4 shrink-0 text-primary" aria-hidden />
+        {label}
+      </Button>
+    );
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -66,11 +95,7 @@ export function BrazilianDatePicker({
           )}
         >
           <CalendarIcon className="mr-2 h-4 w-4 shrink-0 text-primary" aria-hidden />
-          {selected ? (
-            format(selected, "dd/MM/yyyy", { locale: ptBR })
-          ) : (
-            "Toque para escolher a data"
-          )}
+          {label}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto border-border bg-card p-0" align="start">

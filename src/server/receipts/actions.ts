@@ -5,12 +5,14 @@ import { auth } from "@/auth";
 import prisma from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { sendHtmlEmail, smtpErrorToUserMessage } from "@/lib/mail";
-import { signReceiptPdfAccess } from "@/lib/receipt-pdf-token";
+import { renderFinalizedReceiptPdfBuffer } from "@/lib/pdf/render-receipt-pdf-server";
 import { normalizePlate } from "@/lib/plate";
 import { z } from "zod";
+import { ReceiptLineKind } from "@prisma/client";
 
 const lineSchema = z.object({
   id: z.string().optional(),
+  kind: z.nativeEnum(ReceiptLineKind),
   description: z.string().min(1).max(200),
   qty: z.number().int().min(1).max(9999),
   unitCents: z.number().int().min(0),
@@ -26,12 +28,26 @@ const step2Schema = z.object({
   pixKey: z.string().min(1).max(120),
   customerEmail: z.union([z.literal(""), z.string().email()]).default(""),
   customerPhone: z.string().max(40).default(""),
+  /** Idempotência: mesmo UUID do aparelho ao reenviar após offline. */
+  clientDraftKey: z.string().uuid().optional(),
 });
 
 async function requireUser() {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Não autenticado");
   return session.user;
+}
+
+export async function getBusinessProfileSnapshot() {
+  await requireUser();
+  const b = await prisma.businessProfile.findFirst();
+  if (!b) return null;
+  return {
+    legalName: b.legalName,
+    cnpj: b.cnpj,
+    phone: b.phone,
+    email: b.email,
+  };
 }
 
 export async function lookupPlate(plate: string) {
@@ -68,6 +84,17 @@ export async function createReceiptDraft(input: z.infer<typeof step2Schema>) {
     return { ok: false as const, error: "Dados inválidos" };
   }
   const data = parsed.data;
+
+  if (data.clientDraftKey) {
+    const existing = await prisma.receipt.findUnique({
+      where: { clientDraftKey: data.clientDraftKey },
+    });
+    if (existing) {
+      revalidatePath("/receipts");
+      return { ok: true as const, receiptId: existing.id };
+    }
+  }
+
   const plate = normalizePlate(data.plate);
   const serviceDate = new Date(`${data.serviceDate}T12:00:00`);
   const yearParsed =
@@ -140,6 +167,7 @@ export async function createReceiptDraft(input: z.infer<typeof step2Schema>) {
         customerEmail: data.customerEmail || null,
         customerPhone: data.customerPhone || null,
         status: "DRAFT",
+        ...(data.clientDraftKey ? { clientDraftKey: data.clientDraftKey } : {}),
       },
     });
   });
@@ -172,6 +200,7 @@ export async function saveReceiptDraft(input: z.infer<typeof draftSchema>) {
   const computedLines = lines.map((l, idx) => {
     const lineTotalCents = l.qty * l.unitCents;
     return {
+      kind: l.kind,
       description: l.description,
       qty: l.qty,
       unitCents: l.unitCents,
@@ -188,6 +217,7 @@ export async function saveReceiptDraft(input: z.infer<typeof draftSchema>) {
       await tx.receiptLine.createMany({
         data: computedLines.map((l) => ({
           receiptId,
+          kind: l.kind,
           description: l.description,
           qty: l.qty,
           unitCents: l.unitCents,
@@ -250,7 +280,10 @@ export async function sendReceiptPdfEmail(receiptId: string) {
   const user = await requireUser();
   const receipt = await prisma.receipt.findUnique({
     where: { id: receiptId },
-    include: { lines: true, vehicle: { include: { customer: true } } },
+    include: {
+      lines: { orderBy: { sortOrder: "asc" } },
+      vehicle: { include: { customer: true } },
+    },
   });
   if (!receipt || receipt.status !== "FINALIZED") {
     return { ok: false as const, error: "Recibo não finalizado" };
@@ -258,10 +291,24 @@ export async function sendReceiptPdfEmail(receiptId: string) {
   const to = receipt.customerEmail;
   if (!to) return { ok: false as const, error: "Cliente sem e-mail" };
 
-  const origin =
-    process.env.NEXTAUTH_URL ?? process.env.AUTH_URL ?? "http://localhost:3000";
-  const token = signReceiptPdfAccess(receiptId);
-  const pdfUrl = `${origin}/api/receipts/${receiptId}/pdf?t=${encodeURIComponent(token)}`;
+  const business = await prisma.businessProfile.findFirst();
+  if (!business) {
+    return { ok: false as const, error: "Configuração da oficina incompleta" };
+  }
+
+  let pdfBuffer: Buffer;
+  try {
+    pdfBuffer = await renderFinalizedReceiptPdfBuffer(receipt, {
+      legalName: business.legalName,
+      cnpj: business.cnpj,
+      phone: business.phone,
+      email: business.email,
+    });
+  } catch {
+    return { ok: false as const, error: "Erro ao gerar o PDF do recibo" };
+  }
+
+  const safeName = receipt.id.replace(/[^a-zA-Z0-9-_]/g, "").slice(-16) || "recibo";
 
   try {
     await sendHtmlEmail({
@@ -269,11 +316,17 @@ export async function sendReceiptPdfEmail(receiptId: string) {
       subject: "Seu recibo RIBEIROCAR",
       html: `
       <p>Olá,</p>
-      <p>Segue o link para baixar o PDF do seu recibo:</p>
-      <p><a href="${pdfUrl}">Baixar recibo (PDF)</a></p>
+      <p>Segue em <strong>anexo</strong> o PDF do seu recibo.</p>
       <p>Atenciosamente,<br/>RIBEIROCAR</p>
     `,
-      text: `Baixar recibo: ${pdfUrl}`,
+      text: "Segue em anexo o PDF do seu recibo RIBEIROCAR.",
+      attachments: [
+        {
+          filename: `recibo-${safeName}.pdf`,
+          content: pdfBuffer,
+          contentType: "application/pdf",
+        },
+      ],
     });
   } catch (e) {
     return { ok: false as const, error: smtpErrorToUserMessage(e) };
@@ -337,7 +390,8 @@ export async function searchClients(query: string) {
       vehicles: {
         include: {
           receipts: {
-            orderBy: { createdAt: "desc" },
+            where: { status: "FINALIZED" },
+            orderBy: { serviceDate: "desc" },
             take: 1,
             include: { lines: { take: 5, orderBy: { sortOrder: "asc" } } },
           },

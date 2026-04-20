@@ -17,6 +17,11 @@ enum ReceiptStatus {
   FINALIZED
 }
 
+enum ReceiptLineKind {
+  PRODUCT
+  SERVICE
+}
+
 model BusinessProfile {
   id           String   @id @default(cuid())
   legalName    String
@@ -105,6 +110,8 @@ model Receipt {
   id               String         @id @default(cuid())
   /// Chave idempotente p/ importação legada (ex.: hash semântico). `null` = recibo normal do app.
   importSourceKey  String?        @unique
+  /// UUID gerado no cliente p/ criar o mesmo rascunho uma vez ao sincronizar após offline.
+  clientDraftKey   String?        @unique
   status           ReceiptStatus  @default(DRAFT)
   vehicleId        String
   vehicle          Vehicle        @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
@@ -127,14 +134,15 @@ model Receipt {
 }
 
 model ReceiptLine {
-  id            String  @id @default(cuid())
-  receiptId     String
-  receipt       Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
-  description   String
-  qty           Int
-  unitCents     Int
+  id             String          @id @default(cuid())
+  receiptId      String
+  receipt        Receipt         @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  kind           ReceiptLineKind @default(PRODUCT)
+  description    String
+  qty            Int
+  unitCents      Int
   lineTotalCents Int
-  sortOrder     Int     @default(0)
+  sortOrder      Int             @default(0)
 
   @@index([receiptId])
   @@index([description])

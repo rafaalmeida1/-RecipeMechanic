@@ -61,6 +61,11 @@ export async function sendHtmlEmail(opts: {
   subject: string;
   html: string;
   text?: string;
+  attachments?: Array<{
+    filename: string;
+    content: Buffer;
+    contentType?: string;
+  }>;
 }): Promise<void> {
   const transport = getSmtpTransport();
   await transport.sendMail({
@@ -69,5 +74,6 @@ export async function sendHtmlEmail(opts: {
     subject: opts.subject,
     html: opts.html,
     text: opts.text,
+    attachments: opts.attachments,
   });
 }

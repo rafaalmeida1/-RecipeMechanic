@@ -107,6 +107,7 @@ export function InvitesManager() {
         <Button
           type="button"
           className="gap-2"
+          loading={pending}
           disabled={pending || !email}
           onClick={() => {
             setError(null);
@@ -127,7 +128,7 @@ export function InvitesManager() {
             });
           }}
         >
-          <UserPlus className="h-4 w-4" />
+          {!pending ? <UserPlus className="h-4 w-4" aria-hidden /> : null}
           Gerar convite
         </Button>
       </Card>
@@ -195,6 +196,7 @@ export function AcceptInviteForm({ token }: { token: string }) {
       <Button
         type="button"
         className="w-full gap-2"
+        loading={pending}
         disabled={pending || password.length < 6}
         onClick={() => {
           setError(null);

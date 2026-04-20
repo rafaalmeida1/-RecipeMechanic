@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { KeyRound, Mail, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,8 @@ export function LoginForm() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const [magicBusy, setMagicBusy] = useState(false);
+  const [pwdBusy, setPwdBusy] = useState(false);
 
   return (
     <Card className="border-border/80 shadow-2xl shadow-black/40">
@@ -91,49 +92,61 @@ export function LoginForm() {
           <Button
             type="button"
             className="w-full gap-2"
-            disabled={pending || !email}
+            loading={magicBusy}
+            disabled={magicBusy || pwdBusy || !email}
             onClick={() => {
               setError(null);
               setMessage(null);
-              startTransition(async () => {
-                const res = await sendMagicLink(email);
-                if (!res.ok) {
-                  setError(res.error);
-                  return;
+              setMagicBusy(true);
+              void (async () => {
+                try {
+                  const res = await sendMagicLink(email);
+                  if (!res.ok) {
+                    setError(res.error);
+                    return;
+                  }
+                  setMessage(
+                    "Enviamos um link para seu e-mail. Abra a caixa de entrada e toque no link para entrar.",
+                  );
+                } finally {
+                  setMagicBusy(false);
                 }
-                setMessage(
-                  "Enviamos um link para seu e-mail. Abra a caixa de entrada e toque no link para entrar.",
-                );
-              });
+              })();
             }}
           >
-            <Mail className="h-4 w-4" />
+            {!magicBusy ? <Mail className="h-4 w-4" aria-hidden /> : null}
             Receber link no e-mail
           </Button>
           <Button
             type="button"
             variant="secondary"
             className="w-full gap-2"
-            disabled={pending || !email || !password}
+            loading={pwdBusy}
+            disabled={magicBusy || pwdBusy || !email || !password}
             onClick={() => {
               setError(null);
               setMessage(null);
-              startTransition(async () => {
-                const res = await signIn("credentials", {
-                  email: email.trim().toLowerCase(),
-                  password,
-                  redirect: false,
-                  callbackUrl: "/",
-                });
-                if (res?.error) {
-                  setError("E-mail ou senha incorretos.");
-                  return;
+              setPwdBusy(true);
+              void (async () => {
+                try {
+                  const res = await signIn("credentials", {
+                    email: email.trim().toLowerCase(),
+                    password,
+                    redirect: false,
+                    callbackUrl: "/",
+                  });
+                  if (res?.error) {
+                    setError("E-mail ou senha incorretos.");
+                    return;
+                  }
+                  window.location.href = "/";
+                } finally {
+                  setPwdBusy(false);
                 }
-                window.location.href = "/";
-              });
+              })();
             }}
           >
-            <KeyRound className="h-4 w-4" />
+            {!pwdBusy ? <KeyRound className="h-4 w-4" aria-hidden /> : null}
             Entrar com senha
           </Button>
         </div>

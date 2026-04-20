@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
-import { renderToBuffer } from "@react-pdf/renderer";
-import React from "react";
 import { auth } from "@/auth";
 import prisma from "@/lib/db";
-import { ReceiptPdfDocument } from "@/pdf/receipt-document";
+import { renderFinalizedReceiptPdfBuffer } from "@/lib/pdf/render-receipt-pdf-server";
 import { verifyReceiptPdfAccess } from "@/lib/receipt-pdf-token";
 
 /** @react-pdf/renderer precisa do runtime Node (fs, Buffer, layout). Edge quebra o PDF. */
@@ -45,18 +43,12 @@ export async function GET(
   }
 
   try {
-    const doc = React.createElement(ReceiptPdfDocument, {
-      business: {
-        legalName: business.legalName,
-        cnpj: business.cnpj,
-        phone: business.phone,
-        email: business.email,
-      },
-      receipt,
+    const buffer = await renderFinalizedReceiptPdfBuffer(receipt, {
+      legalName: business.legalName,
+      cnpj: business.cnpj,
+      phone: business.phone,
+      email: business.email,
     });
-    const buffer = await renderToBuffer(
-      doc as Parameters<typeof renderToBuffer>[0],
-    );
 
     if (!buffer.byteLength) {
       return new NextResponse("PDF vazio", { status: 500 });

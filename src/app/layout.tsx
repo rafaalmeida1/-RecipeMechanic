@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AppSessionProvider } from "@/components/session-provider";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -14,9 +14,19 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+export const viewport: Viewport = {
+  themeColor: "#09090b",
+};
+
 export const metadata: Metadata = {
   title: "RIBEIROCAR",
   description: "Recibos e histórico de serviços",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "RIBEIROCAR",
+    statusBarStyle: "black-translucent",
+  },
 };
 
 export default function RootLayout({

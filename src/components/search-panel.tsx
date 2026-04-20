@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import {
   AlertCircle,
   CheckCircle2,
+  ChevronRight,
   Loader2,
   Search,
   SearchX,
@@ -25,15 +26,33 @@ export function SearchPanel() {
   const [results, setResults] = useState<SearchResult>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  /** Última busca concluída (para mensagens “nenhum resultado” / sucesso). */
-  const [finishedQuery, setFinishedQuery] = useState<string | null>(null);
+  const [lastSearched, setLastSearched] = useState<string | null>(null);
 
   const trimmed = q.trim();
   const canSearch = useMemo(() => trimmed.length >= 2, [trimmed]);
   const tooShort = trimmed.length > 0 && trimmed.length < 2;
 
+  const runSearch = useCallback(() => {
+    if (!canSearch) return;
+    const query = trimmed;
+    setError(null);
+    startTransition(async () => {
+      try {
+        const rows = await searchClients(query);
+        setResults(rows);
+        setLastSearched(query);
+      } catch {
+        setResults([]);
+        setLastSearched(null);
+        setError(
+          "Não foi possível concluir a busca. Verifique a internet e tente outra vez.",
+        );
+      }
+    });
+  }, [canSearch, trimmed]);
+
   const showOutcome =
-    !pending && finishedQuery !== null && finishedQuery === trimmed;
+    !pending && lastSearched !== null && lastSearched === trimmed;
 
   return (
     <Card className="space-y-5 border-border/80">
@@ -50,42 +69,33 @@ export function SearchPanel() {
               setQ(e.target.value);
               setError(null);
             }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                runSearch();
+              }
+            }}
             placeholder="Placa, nome, telefone ou e-mail"
+            autoComplete="off"
             aria-describedby="search-hint"
+            className="min-h-12 flex-1 text-base"
           />
           <Button
             type="button"
-            className="shrink-0 sm:w-40"
+            className="h-12 shrink-0 touch-manipulation sm:w-40"
+            loading={pending}
             disabled={!canSearch || pending}
-            onClick={() => {
-              setError(null);
-              startTransition(async () => {
-                try {
-                  const query = q.trim();
-                  const rows = await searchClients(query);
-                  setResults(rows);
-                  setFinishedQuery(query);
-                } catch {
-                  setResults([]);
-                  setFinishedQuery(null);
-                  setError(
-                    "Não foi possível concluir a busca. Verifique a internet e tente outra vez.",
-                  );
-                }
-              });
-            }}
+            onClick={() => runSearch()}
           >
-            {pending ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-            ) : (
-              <Search className="h-4 w-4" aria-hidden />
-            )}
-            <span>{pending ? "Aguarde…" : "Buscar"}</span>
+            {!pending ? <Search className="h-4 w-4" aria-hidden /> : null}
+            {pending ? "Buscando…" : "Buscar"}
           </Button>
         </div>
         <p id="search-hint" className="text-xs text-muted-foreground">
-          Mínimo <strong className="text-foreground">2 caracteres</strong>. Os
-          resultados aparecem logo abaixo, com um resumo do que aconteceu.
+          Mínimo <strong className="text-foreground">2 caracteres</strong>. A busca no banco
+          só roda quando você toca em <strong className="text-foreground">Buscar</strong> ou
+          pressiona <strong className="text-foreground">Enter</strong> — assim não dispara a
+          cada letra.
         </p>
       </div>
 
@@ -98,14 +108,13 @@ export function SearchPanel() {
           <div>
             <p className="font-medium text-amber-100">Busca muito curta</p>
             <p className="mt-1 text-amber-100/85">
-              Digite pelo menos mais um caractere para liberar o botão{" "}
-              <span className="font-semibold">Buscar</span>.
+              Digite pelo menos mais um caractere antes de buscar.
             </p>
           </div>
         </div>
       ) : null}
 
-      {pending ? (
+      {canSearch && pending ? (
         <div
           className="flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/10 px-4 py-4 text-sm text-foreground"
           role="status"
@@ -143,12 +152,11 @@ export function SearchPanel() {
           <div>
             <p className="font-semibold text-emerald-100">
               {results.length === 1
-                ? "Encontramos 1 cliente"
-                : `Encontramos ${results.length} clientes`}
+                ? "1 cliente encontrado"
+                : `${results.length} clientes encontrados`}
             </p>
             <p className="mt-1 text-emerald-100/85">
-              Para “<span className="font-mono font-medium">{finishedQuery}</span>”.
-              Veja os detalhes abaixo.
+              Toque no card para abrir o histórico completo.
             </p>
           </div>
         </div>
@@ -161,13 +169,11 @@ export function SearchPanel() {
         >
           <SearchX className="mt-0.5 h-6 w-6 shrink-0 text-muted-foreground" aria-hidden />
           <div className="min-w-0">
-            <p className="text-base font-semibold text-foreground">
-              Nenhum resultado
-            </p>
+            <p className="text-base font-semibold text-foreground">Nenhum resultado</p>
             <p className="mt-2 leading-relaxed text-muted-foreground">
               Não encontramos ninguém no cadastro para{" "}
               <span className="break-words font-mono text-foreground">
-                “{finishedQuery}”
+                “{lastSearched}”
               </span>
               .
             </p>
@@ -183,95 +189,113 @@ export function SearchPanel() {
         </div>
       ) : null}
 
-      <div className="space-y-4">
-        {results.map((c) => (
-          <div
-            key={c.id}
-            className="rounded-xl border border-border/80 bg-muted/20 p-4"
-          >
-            <div className="flex items-start gap-2">
-              <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-background text-foreground shadow-sm">
-                <User className="h-4 w-4" aria-hidden />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="font-semibold text-foreground">{c.name}</div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {c.phone ? `Tel: ${c.phone}` : null}
-                  {c.phone && c.email ? " · " : null}
-                  {c.email ? c.email : null}
-                </div>
-              </div>
-            </div>
+      <div className="space-y-3">
+        {results.map((c) => {
+          const plateSummary =
+            c.vehicles.length === 0
+              ? "Sem veículos"
+              : c.vehicles.length <= 2
+                ? c.vehicles.map((v) => formatPlateDisplay(v.plateNormalized)).join(" · ")
+                : `${c.vehicles.length} veículos cadastrados`;
 
-            {c.vehicles.length === 0 ? (
-              <div
-                className="mt-4 rounded-lg border border-dashed border-border px-3 py-3 text-center text-xs text-muted-foreground"
-                role="status"
+          return (
+            <div
+              key={c.id}
+              className="overflow-hidden rounded-xl border border-border/80 bg-muted/20"
+            >
+              <Link
+                href={`/customers/${c.id}`}
+                className="flex min-h-[4.5rem] items-start gap-3 p-4 transition-colors hover:bg-muted/35 active:bg-muted/45"
               >
-                Este cliente ainda não tem veículo cadastrado no sistema.
-              </div>
-            ) : (
-              <div className="mt-4 space-y-2">
-                {c.vehicles.map((v) => {
-                  const last = v.receipts[0];
-                  return (
-                    <div
-                      key={v.id}
-                      className="rounded-lg border border-border/60 bg-card/80 p-3 shadow-sm"
-                    >
-                      <div className="text-sm font-medium text-foreground">
-                        {v.label}{" "}
-                        <span className="font-normal text-muted-foreground">
-                          · {formatPlateDisplay(v.plateNormalized)}
-                        </span>
+                <span className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-background text-foreground shadow-sm">
+                  <User className="h-5 w-5" aria-hidden />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-base font-semibold text-foreground">{c.name}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {c.phone ? `Tel: ${c.phone}` : null}
+                        {c.phone && c.email ? " · " : null}
+                        {c.email ? c.email : null}
+                        {!c.phone && !c.email ? "Sem telefone/e-mail" : null}
                       </div>
-                      {last ? (
-                        <div className="mt-2 space-y-2 text-xs text-muted-foreground">
-                          <div>
-                            Último serviço:{" "}
-                            <span className="font-medium text-foreground">
-                              {last.serviceDate.toLocaleDateString("pt-BR")}
-                            </span>{" "}
-                            · Total{" "}
-                            <span className="font-medium text-primary">
-                              {formatCentsBRL(last.totalCents)}
-                            </span>
-                          </div>
-                          <p className="line-clamp-2 text-[11px] leading-relaxed">
-                            {last.lines
-                              .slice(0, 3)
-                              .map((l) => l.description)
-                              .join(" · ")}
-                          </p>
-                          <Button
-                            variant="link"
-                            className="h-auto p-0 text-primary"
-                            asChild
-                          >
-                            <Link href={`/receipts/${last.id}`}>
-                              Ver recibo completo
-                            </Link>
-                          </Button>
-                        </div>
-                      ) : (
-                        <p
-                          className="mt-2 rounded-md bg-muted/40 px-2 py-2 text-xs text-muted-foreground"
-                          role="status"
-                        >
-                          <span className="font-medium text-foreground">
-                            Nenhum recibo ainda
-                          </span>{" "}
-                          para este veículo. Quando finalizar um serviço, ele aparecerá
-                          aqui.
-                        </p>
-                      )}
+                      <div className="mt-2 text-xs font-medium text-primary">{plateSummary}</div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        ))}
+                    <ChevronRight className="mt-1 h-5 w-5 shrink-0 text-muted-foreground" />
+                  </div>
+                  <span className="mt-2 inline-block text-xs font-medium text-primary underline-offset-4">
+                    Abrir histórico completo do cliente
+                  </span>
+                </div>
+              </Link>
+
+              {c.vehicles.length === 0 ? (
+                <div
+                  className="border-t border-border/50 px-4 py-3 text-center text-xs text-muted-foreground"
+                  role="status"
+                >
+                  Este cliente ainda não tem veículo cadastrado no sistema.
+                </div>
+              ) : (
+                <div className="space-y-2 border-t border-border/50 px-4 pb-4 pt-3">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Último serviço finalizado por veículo
+                  </p>
+                  {c.vehicles.map((v) => {
+                    const last = v.receipts[0];
+                    return (
+                      <div
+                        key={v.id}
+                        className="rounded-lg border border-border/60 bg-card/80 p-3 text-left shadow-sm"
+                      >
+                        <div className="text-sm font-medium text-foreground">
+                          {v.label}{" "}
+                          <span className="font-normal text-muted-foreground">
+                            · {formatPlateDisplay(v.plateNormalized)}
+                          </span>
+                        </div>
+                        {last ? (
+                          <div className="mt-2 space-y-2 text-xs text-muted-foreground">
+                            <div>
+                              Data:{" "}
+                              <span className="font-medium text-foreground">
+                                {last.serviceDate.toLocaleDateString("pt-BR")}
+                              </span>{" "}
+                              · Total{" "}
+                              <span className="font-medium text-primary">
+                                {formatCentsBRL(last.totalCents)}
+                              </span>
+                            </div>
+                            <p className="line-clamp-2 text-[11px] leading-relaxed">
+                              {last.lines
+                                .slice(0, 3)
+                                .map((l) => l.description)
+                                .join(" · ")}
+                            </p>
+                            <Button variant="link" className="h-auto p-0 text-primary" asChild>
+                              <Link href={`/receipts/${last.id}`}>Ver este recibo</Link>
+                            </Button>
+                          </div>
+                        ) : (
+                          <p
+                            className="mt-2 rounded-md bg-muted/40 px-2 py-2 text-xs text-muted-foreground"
+                            role="status"
+                          >
+                            <span className="font-medium text-foreground">
+                              Nenhum recibo finalizado ainda
+                            </span>{" "}
+                            para este veículo.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </Card>
   );

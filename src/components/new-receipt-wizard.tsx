@@ -1,12 +1,19 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { useRouterWithLoading } from "@/components/navigation-progress";
 import {
   createReceiptDraft,
+  getBusinessProfileSnapshot,
   lookupPlate,
 } from "@/server/receipts/actions";
-import { formatPlateDisplay } from "@/lib/plate";
+import {
+  OFFLINE_SYNC_EVENT,
+  enqueueOfflineBundle,
+  type OfflineSyncDetail,
+} from "@/lib/offline/receipt-sync";
+import { writeCachedBusiness } from "@/lib/offline/business-cache";
+import { formatPlateDisplay, normalizePlate } from "@/lib/plate";
 import { Car, ChevronRight, Hash } from "lucide-react";
 import { BrazilianDatePicker } from "@/components/brazilian-date-picker";
 import { Button } from "@/components/ui/button";
@@ -23,7 +30,8 @@ function todayLocalISO() {
 }
 
 export function NewReceiptWizard({ pixDefault }: { pixDefault: string }) {
-  const router = useRouter();
+  const router = useRouterWithLoading();
+  const [clientDraftKey] = useState(() => crypto.randomUUID());
   const [step, setStep] = useState<1 | 2>(1);
   const [plate, setPlate] = useState("");
   const [lookup, setLookup] = useState<Awaited<
@@ -40,6 +48,27 @@ export function NewReceiptWizard({ pixDefault }: { pixDefault: string }) {
   const [pixKey, setPixKey] = useState(pixDefault);
   const [customerEmail, setCustomerEmail] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
+  useEffect(() => {
+    if (typeof navigator !== "undefined" && navigator.onLine) {
+      void getBusinessProfileSnapshot().then((b) => {
+        if (b) writeCachedBusiness(b);
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    const onSynced = (e: Event) => {
+      const d = (e as CustomEvent<OfflineSyncDetail>).detail;
+      if (
+        (d.kind === "wizard" || d.kind === "bundle") &&
+        d.clientDraftKey === clientDraftKey
+      ) {
+        router.push(`/receipts/${d.receiptId}`);
+      }
+    };
+    window.addEventListener(OFFLINE_SYNC_EVENT, onSynced);
+    return () => window.removeEventListener(OFFLINE_SYNC_EVENT, onSynced);
+  }, [clientDraftKey, router]);
 
   const plateHint = useMemo(() => {
     if (!lookup?.ok) return null;
@@ -117,9 +146,25 @@ export function NewReceiptWizard({ pixDefault }: { pixDefault: string }) {
             <Button
               type="button"
               className="gap-2"
+              loading={pending}
               disabled={pending || plate.trim().length < 5}
               onClick={() => {
                 setError(null);
+                if (typeof navigator !== "undefined" && !navigator.onLine) {
+                  const n = normalizePlate(plate);
+                  if (n.length < 5) {
+                    setError("Placa inválida (mín. 5 caracteres).");
+                    return;
+                  }
+                  setLookup({ ok: true, normalized: n, vehicle: null });
+                  setCustomerName("");
+                  setVehicleLabel("");
+                  setYear("");
+                  setCustomerEmail("");
+                  setCustomerPhone("");
+                  setStep(2);
+                  return;
+                }
                 startTransition(async () => {
                   const res = await lookupPlate(plate);
                   if (!res.ok) {
@@ -145,7 +190,7 @@ export function NewReceiptWizard({ pixDefault }: { pixDefault: string }) {
               }}
             >
               Continuar
-              <ChevronRight className="h-4 w-4" />
+              {!pending ? <ChevronRight className="h-4 w-4" aria-hidden /> : null}
             </Button>
           </div>
         </Card>
@@ -253,31 +298,47 @@ export function NewReceiptWizard({ pixDefault }: { pixDefault: string }) {
             <Button
               type="button"
               className="gap-2"
+              loading={pending}
               disabled={pending}
               onClick={() => {
                 setError(null);
-                startTransition(async () => {
-                  const res = await createReceiptDraft({
-                    plate,
-                    customerName,
-                    vehicleLabel,
-                    year,
-                    km,
-                    serviceDate,
-                    pixKey,
-                    customerEmail,
-                    customerPhone,
+                const wizardPayload = {
+                  plate,
+                  customerName,
+                  vehicleLabel,
+                  year,
+                  km,
+                  serviceDate,
+                  pixKey,
+                  customerEmail,
+                  customerPhone,
+                };
+                if (typeof navigator !== "undefined" && !navigator.onLine) {
+                  void enqueueOfflineBundle(clientDraftKey, wizardPayload).then(() => {
+                    router.push(`/receipts/offline/${clientDraftKey}`);
                   });
-                  if (!res.ok) {
-                    setError(res.error);
-                    return;
+                  return;
+                }
+                startTransition(async () => {
+                  try {
+                    const res = await createReceiptDraft({
+                      ...wizardPayload,
+                      clientDraftKey,
+                    });
+                    if (!res.ok) {
+                      setError(res.error);
+                      return;
+                    }
+                    router.push(`/receipts/${res.receiptId}`);
+                  } catch {
+                    await enqueueOfflineBundle(clientDraftKey, wizardPayload);
+                    router.push(`/receipts/offline/${clientDraftKey}`);
                   }
-                  router.push(`/receipts/${res.receiptId}`);
                 });
               }}
             >
               Ir para peças e valores
-              <ChevronRight className="h-4 w-4" />
+              {!pending ? <ChevronRight className="h-4 w-4" aria-hidden /> : null}
             </Button>
           </div>
         </Card>

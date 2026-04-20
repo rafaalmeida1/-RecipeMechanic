@@ -1,7 +1,11 @@
 import { Document, Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
-import fs from "fs";
-import path from "path";
-import type { Receipt, ReceiptLine, Vehicle, Customer } from "@prisma/client";
+import {
+  ReceiptLineKind,
+  type Receipt,
+  type ReceiptLine,
+  type Vehicle,
+  type Customer,
+} from "@prisma/client";
 import { formatPlateDisplay } from "@/lib/plate";
 import { formatCentsBRL } from "@/lib/money";
 
@@ -126,10 +130,11 @@ const styles = StyleSheet.create({
     minHeight: 26,
     backgroundColor: "#0C0C0C",
   },
-  colPart: { width: "44%" },
-  colQty: { width: "10%", textAlign: "center" },
-  colUnit: { width: "23%", textAlign: "right" },
-  colTot: { width: "23%", textAlign: "right" },
+  colKind: { width: "11%", textAlign: "center" },
+  colPart: { width: "33%" },
+  colQty: { width: "9%", textAlign: "center" },
+  colUnit: { width: "22%", textAlign: "right" },
+  colTot: { width: "25%", textAlign: "right" },
   totals: {
     marginTop: 14,
     paddingTop: 10,
@@ -156,20 +161,8 @@ const styles = StyleSheet.create({
   },
 });
 
-/** Logo do recibo: prioriza `public/logo/logo_ribeirocar.png`. */
-function loadLogoDataUri(): string | null {
-  const candidates = [
-    path.join(process.cwd(), "public", "logo", "logo_ribeirocar.png"),
-    path.join(process.cwd(), "public", "logo", "ribeirocar.png"),
-    path.join(process.cwd(), "logo_ribeirocar.png"),
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) {
-      const b = fs.readFileSync(p);
-      return `data:image/png;base64,${b.toString("base64")}`;
-    }
-  }
-  return null;
+function lineKindLabel(kind: ReceiptLineKind): string {
+  return kind === ReceiptLineKind.SERVICE ? "Serviço" : "Peça";
 }
 
 export type ReceiptPdfProps = {
@@ -179,14 +172,23 @@ export type ReceiptPdfProps = {
     phone: string;
     email: string;
   };
+  /** `data:image/...` ou URL; `null` = placeholder. */
+  logoSrc: string | null;
+  /** Texto extra no rodapé (ex.: rascunho offline). */
+  draftFooterNote?: string | null;
   receipt: Receipt & {
     lines: ReceiptLine[];
     vehicle: Vehicle & { customer: Customer };
   };
 };
 
-export function ReceiptPdfDocument({ business, receipt }: ReceiptPdfProps) {
-  const logo = loadLogoDataUri();
+export function ReceiptPdfDocument({
+  business,
+  receipt,
+  logoSrc,
+  draftFooterNote,
+}: ReceiptPdfProps) {
+  const logo = logoSrc;
   const plate = formatPlateDisplay(receipt.vehicle.plateNormalized);
   const customerName =
     receipt.customerNameSnap ?? receipt.vehicle.customer.name;
@@ -257,6 +259,7 @@ export function ReceiptPdfDocument({ business, receipt }: ReceiptPdfProps) {
 
         <Text style={styles.tableTitle}>Peças e serviços</Text>
         <View style={styles.tableHeader}>
+          <Text style={styles.colKind}>Tipo</Text>
           <Text style={styles.colPart}>Descrição</Text>
           <Text style={styles.colQty}>Qtd</Text>
           <Text style={styles.colUnit}>Valor unit.</Text>
@@ -268,6 +271,7 @@ export function ReceiptPdfDocument({ business, receipt }: ReceiptPdfProps) {
             style={i % 2 === 0 ? styles.tableRow : styles.tableRowAlt}
             wrap={false}
           >
+            <Text style={styles.colKind}>{lineKindLabel(line.kind)}</Text>
             <Text style={styles.colPart}>{line.description}</Text>
             <Text style={styles.colQty}>{line.qty}</Text>
             <Text style={styles.colUnit}>{formatCentsBRL(line.unitCents)}</Text>
@@ -286,6 +290,9 @@ export function ReceiptPdfDocument({ business, receipt }: ReceiptPdfProps) {
             Documento para controle de serviços prestados. Valores expressos em
             reais (BRL).{"\n"}
             RIBEIROCAR — Obrigado pela preferência.
+            {draftFooterNote
+              ? `\n\n${draftFooterNote}`
+              : ""}
           </Text>
         </View>
       </Page>

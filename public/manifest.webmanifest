@@ -1,0 +1,24 @@
+{
+  "name": "RIBEIROCAR",
+  "short_name": "RIBEIROCAR",
+  "description": "Recibos e histórico de serviços",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "icons": [
+    {
+      "src": "/logo/logo_ribeirocar.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo/logo_ribeirocar.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
