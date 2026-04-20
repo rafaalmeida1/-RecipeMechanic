@@ -11,7 +11,9 @@ import { getDraftById, type BundleLine, type OutboxRecord } from "@/lib/offline/
 import { readCachedBusiness, writeCachedBusiness } from "@/lib/offline/business-cache";
 import { downloadOfflineReceiptPdf } from "@/lib/pdf/download-receipt-pdf-browser";
 import { formatCentsBRL, parseMoneyToCents } from "@/lib/money";
+import type { ReceiptPdfTheme } from "@prisma/client";
 import { ReceiptLineKind } from "@prisma/client";
+import { OfflinePdfThemeChoice } from "@/components/receipt-pdf-theme-picker";
 import { getBusinessProfileSnapshot } from "@/server/receipts/actions";
 import {
   ArrowLeft,
@@ -84,6 +86,7 @@ export function OfflineReceiptWorkspace({ draftKey }: { draftKey: string }) {
   const router = useRouterWithLoading();
   const [draft, setDraft] = useState<OutboxRecord | null | undefined>(undefined);
   const [pdfPending, startPdf] = useTransition();
+  const [pdfTheme, setPdfTheme] = useState<ReceiptPdfTheme>("LIGHT");
   const [error, setError] = useState<string | null>(null);
   const lastSavedSig = useRef<string | null>(null);
 
@@ -276,6 +279,10 @@ export function OfflineReceiptWorkspace({ draftKey }: { draftKey: string }) {
           </p>
         ) : null}
 
+        <div className="border-t border-border/60 pt-4">
+          <OfflinePdfThemeChoice value={pdfTheme} onChange={setPdfTheme} />
+        </div>
+
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-between">
           <Button
             type="button"
@@ -307,6 +314,7 @@ export function OfflineReceiptWorkspace({ draftKey }: { draftKey: string }) {
                     bundleLines: bl,
                     draftKey,
                     cachedBusiness: cached,
+                    pdfTheme,
                   });
                 } catch (e) {
                   setError(e instanceof Error ? e.message : "Não foi possível gerar o PDF.");

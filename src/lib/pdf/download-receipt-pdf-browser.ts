@@ -5,6 +5,7 @@ import React from "react";
 import { ReceiptPdfDocument } from "@/pdf/receipt-document";
 import { buildOfflineReceiptPdfModel } from "@/lib/pdf/build-offline-receipt-model";
 import type { BusinessProfileSnapshot } from "@/lib/offline/business-cache";
+import type { ReceiptPdfTheme } from "@prisma/client";
 import type { WizardSyncPayload, BundleLine } from "@/lib/offline/outbox";
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
@@ -45,8 +46,9 @@ export async function downloadOfflineReceiptPdf(params: {
   bundleLines: BundleLine[];
   draftKey: string;
   cachedBusiness: BusinessProfileSnapshot | null;
+  pdfTheme?: ReceiptPdfTheme;
 }): Promise<void> {
-  const { wizard, bundleLines, draftKey, cachedBusiness } = params;
+  const { wizard, bundleLines, draftKey, cachedBusiness, pdfTheme = "LIGHT" } = params;
   const business = cachedBusiness ?? FALLBACK_BUSINESS;
   const receipt = buildOfflineReceiptPdfModel(wizard, bundleLines, draftKey);
   const logoSrc = await fetchLogoDataUriFromPublic();
@@ -54,6 +56,7 @@ export async function downloadOfflineReceiptPdf(params: {
   const doc = React.createElement(ReceiptPdfDocument, {
     business,
     logoSrc,
+    pdfTheme,
     draftFooterNote:
       "Rascunho gerado neste aparelho. Pendente de sincronização com o servidor.",
     receipt,

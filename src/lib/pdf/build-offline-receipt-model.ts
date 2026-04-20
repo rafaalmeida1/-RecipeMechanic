@@ -1,4 +1,5 @@
 import {
+  ReceiptPdfTheme,
   ReceiptStatus,
   type Receipt,
   type ReceiptLine,
@@ -87,6 +88,7 @@ export function buildOfflineReceiptPdfModel(
     totalCents,
     finalizedAt: null,
     emailSentAt: null,
+    pdfTheme: ReceiptPdfTheme.LIGHT,
     createdAt: serviceDate,
     updatedAt: serviceDate,
     lines,

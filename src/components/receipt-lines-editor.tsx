@@ -9,8 +9,10 @@ import {
 } from "@/server/receipts/actions";
 import { OFFLINE_SYNC_EVENT, enqueueLinesDraft } from "@/lib/offline/receipt-sync";
 import { formatCentsBRL, parseMoneyToCents } from "@/lib/money";
+import type { ReceiptPdfTheme } from "@prisma/client";
 import { ReceiptLineKind } from "@prisma/client";
 import { CircleDollarSign, Loader2, Plus, Trash2 } from "lucide-react";
+import { ReceiptPdfThemePicker } from "@/components/receipt-pdf-theme-picker";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -48,8 +50,10 @@ function linesSignature(lines: DraftLine[]) {
 export function ReceiptLinesEditor({
   receiptId,
   initialLines,
+  pdfTheme,
 }: {
   receiptId: string;
+  pdfTheme: ReceiptPdfTheme;
   initialLines: Array<{
     kind: ReceiptLineKind;
     description: string;
@@ -277,6 +281,14 @@ export function ReceiptLinesEditor({
             {error}
           </p>
         ) : null}
+
+        <div className="border-t border-border/60 pt-5">
+          <ReceiptPdfThemePicker
+            receiptId={receiptId}
+            initialTheme={pdfTheme}
+            variant="compact"
+          />
+        </div>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
           <Button

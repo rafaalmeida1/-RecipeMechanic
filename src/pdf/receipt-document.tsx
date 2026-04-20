@@ -1,6 +1,7 @@
-import { Document, Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
+import { Document, Image, Page, Text, View } from "@react-pdf/renderer";
 import {
   ReceiptLineKind,
+  ReceiptPdfTheme,
   type Receipt,
   type ReceiptLine,
   type Vehicle,
@@ -8,158 +9,13 @@ import {
 } from "@prisma/client";
 import { formatPlateDisplay } from "@/lib/plate";
 import { formatCentsBRL } from "@/lib/money";
+import {
+  getReceiptPdfStyles,
+  receiptPdfStylesDark,
+  receiptPdfStylesLight,
+} from "@/pdf/receipt-pdf-styles";
 
 const GOLD = "#FFD700";
-const BLACK = "#000000";
-const WHITE = "#FFFFFF";
-const MUTED = "#9CA3AF";
-const LINE = "#3F3F46";
-
-const styles = StyleSheet.create({
-  page: {
-    paddingTop: 32,
-    paddingBottom: 40,
-    paddingHorizontal: 36,
-    fontFamily: "Helvetica",
-    fontSize: 9.5,
-    color: WHITE,
-    backgroundColor: BLACK,
-  },
-  goldBar: {
-    height: 3,
-    width: "100%",
-    backgroundColor: GOLD,
-    marginBottom: 14,
-  },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    marginBottom: 16,
-  },
-  logoWrap: {
-    width: 88,
-    marginRight: 14,
-  },
-  logo: {
-    width: 82,
-    height: 82,
-    borderRadius: 41,
-    borderWidth: 2,
-    borderColor: GOLD,
-  },
-  headerText: {
-    flexGrow: 1,
-    paddingTop: 2,
-  },
-  brand: {
-    fontFamily: "Helvetica-Bold",
-    fontSize: 22,
-    letterSpacing: 2,
-    color: GOLD,
-    marginBottom: 2,
-  },
-  docKind: {
-    fontSize: 8,
-    letterSpacing: 1.5,
-    color: MUTED,
-    textTransform: "uppercase",
-    marginBottom: 8,
-  },
-  metaLine: {
-    marginBottom: 3,
-    color: WHITE,
-    fontSize: 9,
-  },
-  refLine: {
-    marginTop: 6,
-    fontSize: 8,
-    color: MUTED,
-  },
-  section: {
-    borderWidth: 1.5,
-    borderColor: WHITE,
-    borderRadius: 6,
-    padding: 14,
-    marginBottom: 16,
-  },
-  twoCol: { flexDirection: "row" },
-  col: { flexGrow: 1, width: "48%" },
-  label: {
-    color: GOLD,
-    fontFamily: "Helvetica-Bold",
-    fontSize: 8,
-    textTransform: "uppercase",
-    marginBottom: 2,
-    letterSpacing: 0.5,
-  },
-  value: {
-    color: WHITE,
-    marginBottom: 8,
-    fontSize: 10,
-  },
-  tableTitle: {
-    fontFamily: "Helvetica-Bold",
-    fontSize: 9,
-    color: GOLD,
-    marginBottom: 6,
-    letterSpacing: 0.5,
-  },
-  tableHeader: {
-    flexDirection: "row",
-    backgroundColor: GOLD,
-    color: BLACK,
-    fontFamily: "Helvetica-Bold",
-    paddingVertical: 7,
-    paddingHorizontal: 8,
-    fontSize: 9,
-  },
-  tableRow: {
-    flexDirection: "row",
-    borderBottomWidth: 1,
-    borderBottomColor: LINE,
-    paddingVertical: 7,
-    paddingHorizontal: 8,
-    minHeight: 26,
-  },
-  tableRowAlt: {
-    flexDirection: "row",
-    borderBottomWidth: 1,
-    borderBottomColor: LINE,
-    paddingVertical: 7,
-    paddingHorizontal: 8,
-    minHeight: 26,
-    backgroundColor: "#0C0C0C",
-  },
-  colKind: { width: "11%", textAlign: "center" },
-  colPart: { width: "33%" },
-  colQty: { width: "9%", textAlign: "center" },
-  colUnit: { width: "22%", textAlign: "right" },
-  colTot: { width: "25%", textAlign: "right" },
-  totals: {
-    marginTop: 14,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: GOLD,
-    alignItems: "flex-end",
-  },
-  totalLine: {
-    color: GOLD,
-    fontFamily: "Helvetica-Bold",
-    fontSize: 13,
-  },
-  footer: {
-    marginTop: 28,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: LINE,
-  },
-  footerText: {
-    fontSize: 8,
-    color: MUTED,
-    textAlign: "center",
-    lineHeight: 1.4,
-  },
-});
 
 function lineKindLabel(kind: ReceiptLineKind): string {
   return kind === ReceiptLineKind.SERVICE ? "Serviço" : "Peça";
@@ -172,10 +28,10 @@ export type ReceiptPdfProps = {
     phone: string;
     email: string;
   };
-  /** `data:image/...` ou URL; `null` = placeholder. */
   logoSrc: string | null;
-  /** Texto extra no rodapé (ex.: rascunho offline). */
   draftFooterNote?: string | null;
+  /** Por recibo; padrão escuro. */
+  pdfTheme?: ReceiptPdfTheme;
   receipt: Receipt & {
     lines: ReceiptLine[];
     vehicle: Vehicle & { customer: Customer };
@@ -187,46 +43,63 @@ export function ReceiptPdfDocument({
   receipt,
   logoSrc,
   draftFooterNote,
+  pdfTheme = "LIGHT",
 }: ReceiptPdfProps) {
+  const styles = getReceiptPdfStyles(pdfTheme);
   const logo = logoSrc;
   const plate = formatPlateDisplay(receipt.vehicle.plateNormalized);
   const customerName =
     receipt.customerNameSnap ?? receipt.vehicle.customer.name;
   const ref = receipt.id.replace(/[^a-z0-9]/gi, "").slice(-10).toUpperCase();
+  const isLight = pdfTheme === "LIGHT";
+
+  const headerBlock = (
+    <>
+      <View style={styles.headerRow}>
+        <View style={styles.logoWrap}>
+          {logo ? (
+            // eslint-disable-next-line jsx-a11y/alt-text -- @react-pdf/renderer Image is not DOM <img>
+            <Image style={styles.logo} src={logo} />
+          ) : (
+            <View
+              style={{
+                width: 82,
+                height: 82,
+                borderRadius: 41,
+                borderWidth: 2,
+                borderColor: GOLD,
+                backgroundColor: isLight ? "#27272A" : "#141414",
+              }}
+            />
+          )}
+        </View>
+        <View style={styles.headerText}>
+          <Text style={styles.brand}>RIBEIROCAR</Text>
+          <Text style={styles.docKind}>Recibo de serviço</Text>
+          <Text style={styles.metaLine}>Razão social: {business.legalName}</Text>
+          <Text style={styles.metaLine}>CNPJ: {business.cnpj}</Text>
+          <Text style={styles.metaLine}>Telefone: {business.phone}</Text>
+          <Text style={styles.metaLine}>E-mail: {business.email}</Text>
+          <Text style={styles.refLine}>Ref. documento: {ref}</Text>
+        </View>
+      </View>
+    </>
+  );
 
   return (
     <Document>
       <Page size="A4" style={styles.page}>
-        <View style={styles.goldBar} />
-
-        <View style={styles.headerRow}>
-          <View style={styles.logoWrap}>
-            {logo ? (
-              // eslint-disable-next-line jsx-a11y/alt-text -- @react-pdf/renderer Image is not DOM <img>
-              <Image style={styles.logo} src={logo} />
-            ) : (
-              <View
-                style={{
-                  width: 82,
-                  height: 82,
-                  borderRadius: 41,
-                  borderWidth: 2,
-                  borderColor: GOLD,
-                  backgroundColor: "#141414",
-                }}
-              />
-            )}
+        {isLight ? (
+          <View style={receiptPdfStylesLight.headerCard}>
+            <View style={receiptPdfStylesLight.goldBar} />
+            <View style={receiptPdfStylesLight.headerInner}>{headerBlock}</View>
           </View>
-          <View style={styles.headerText}>
-            <Text style={styles.brand}>RIBEIROCAR</Text>
-            <Text style={styles.docKind}>Recibo de serviço</Text>
-            <Text style={styles.metaLine}>Razão social: {business.legalName}</Text>
-            <Text style={styles.metaLine}>CNPJ: {business.cnpj}</Text>
-            <Text style={styles.metaLine}>Telefone: {business.phone}</Text>
-            <Text style={styles.metaLine}>E-mail: {business.email}</Text>
-            <Text style={styles.refLine}>Ref. documento: {ref}</Text>
-          </View>
-        </View>
+        ) : (
+          <>
+            <View style={receiptPdfStylesDark.goldBar} />
+            {headerBlock}
+          </>
+        )}
 
         <View style={styles.section}>
           <View style={styles.twoCol}>
@@ -259,11 +132,11 @@ export function ReceiptPdfDocument({
 
         <Text style={styles.tableTitle}>Peças e serviços</Text>
         <View style={styles.tableHeader}>
-          <Text style={styles.colKind}>Tipo</Text>
-          <Text style={styles.colPart}>Descrição</Text>
-          <Text style={styles.colQty}>Qtd</Text>
-          <Text style={styles.colUnit}>Valor unit.</Text>
-          <Text style={styles.colTot}>Valor total</Text>
+          <Text style={[styles.colKind, styles.tableHeaderText]}>Tipo</Text>
+          <Text style={[styles.colPart, styles.tableHeaderText]}>Descrição</Text>
+          <Text style={[styles.colQty, styles.tableHeaderText]}>Qtd</Text>
+          <Text style={[styles.colUnit, styles.tableHeaderText]}>Valor unit.</Text>
+          <Text style={[styles.colTot, styles.tableHeaderText]}>Valor total</Text>
         </View>
         {receipt.lines.map((line, i) => (
           <View
@@ -271,11 +144,17 @@ export function ReceiptPdfDocument({
             style={i % 2 === 0 ? styles.tableRow : styles.tableRowAlt}
             wrap={false}
           >
-            <Text style={styles.colKind}>{lineKindLabel(line.kind)}</Text>
-            <Text style={styles.colPart}>{line.description}</Text>
-            <Text style={styles.colQty}>{line.qty}</Text>
-            <Text style={styles.colUnit}>{formatCentsBRL(line.unitCents)}</Text>
-            <Text style={styles.colTot}>{formatCentsBRL(line.lineTotalCents)}</Text>
+            <Text style={[styles.colKind, styles.tableCell]}>
+              {lineKindLabel(line.kind)}
+            </Text>
+            <Text style={[styles.colPart, styles.tableCell]}>{line.description}</Text>
+            <Text style={[styles.colQty, styles.tableCell]}>{line.qty}</Text>
+            <Text style={[styles.colUnit, styles.tableCell]}>
+              {formatCentsBRL(line.unitCents)}
+            </Text>
+            <Text style={[styles.colTot, styles.tableCell]}>
+              {formatCentsBRL(line.lineTotalCents)}
+            </Text>
           </View>
         ))}
 
@@ -290,9 +169,7 @@ export function ReceiptPdfDocument({
             Documento para controle de serviços prestados. Valores expressos em
             reais (BRL).{"\n"}
             RIBEIROCAR — Obrigado pela preferência.
-            {draftFooterNote
-              ? `\n\n${draftFooterNote}`
-              : ""}
+            {draftFooterNote ? `\n\n${draftFooterNote}` : ""}
           </Text>
         </View>
       </Page>

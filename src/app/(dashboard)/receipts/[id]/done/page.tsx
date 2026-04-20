@@ -29,6 +29,7 @@ export default async function ReceiptDonePage({
       serviceDateISO={receipt.serviceDate.toISOString()}
       totalCents={receipt.totalCents}
       pdfUrl={pdfUrl}
+      pdfTheme={receipt.pdfTheme}
     />
   );
 }

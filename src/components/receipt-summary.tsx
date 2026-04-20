@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { FileCheck, Share2 } from "lucide-react";
+import type { ReceiptPdfTheme } from "@prisma/client";
 import { formatCentsBRL } from "@/lib/money";
 import { formatPlateDisplay } from "@/lib/plate";
+import { ReceiptPdfThemePicker } from "@/components/receipt-pdf-theme-picker";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import type { Receipt, ReceiptLine, Vehicle, Customer } from "@prisma/client";
@@ -9,12 +11,14 @@ import type { Receipt, ReceiptLine, Vehicle, Customer } from "@prisma/client";
 export function ReceiptSummary({
   receipt,
   pdfUrl,
+  pdfTheme,
 }: {
   receipt: Receipt & {
     lines: ReceiptLine[];
     vehicle: Vehicle & { customer: Customer };
   };
   pdfUrl: string;
+  pdfTheme: ReceiptPdfTheme;
 }) {
   return (
     <div className="space-y-8">
@@ -49,6 +53,14 @@ export function ReceiptSummary({
             </div>
           </div>
         </div>
+      </Card>
+
+      <Card className="border-primary/10 p-4 sm:p-5">
+        <ReceiptPdfThemePicker
+          receiptId={receipt.id}
+          initialTheme={pdfTheme}
+          variant="compact"
+        />
       </Card>
 
       <div className="flex flex-col gap-3 sm:flex-row">

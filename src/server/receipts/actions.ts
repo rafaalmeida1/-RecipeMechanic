@@ -8,7 +8,8 @@ import { sendHtmlEmail, smtpErrorToUserMessage } from "@/lib/mail";
 import { renderFinalizedReceiptPdfBuffer } from "@/lib/pdf/render-receipt-pdf-server";
 import { normalizePlate } from "@/lib/plate";
 import { z } from "zod";
-import { ReceiptLineKind } from "@prisma/client";
+import { ReceiptLineKind, ReceiptPdfTheme } from "@prisma/client";
+import { setReceiptPdfTheme as applyReceiptPdfTheme } from "./set-receipt-pdf-theme";
 
 const lineSchema = z.object({
   id: z.string().optional(),
@@ -298,12 +299,16 @@ export async function sendReceiptPdfEmail(receiptId: string) {
 
   let pdfBuffer: Buffer;
   try {
-    pdfBuffer = await renderFinalizedReceiptPdfBuffer(receipt, {
-      legalName: business.legalName,
-      cnpj: business.cnpj,
-      phone: business.phone,
-      email: business.email,
-    });
+    pdfBuffer = await renderFinalizedReceiptPdfBuffer(
+      receipt,
+      {
+        legalName: business.legalName,
+        cnpj: business.cnpj,
+        phone: business.phone,
+        email: business.email,
+      },
+      receipt.pdfTheme,
+    );
   } catch {
     return { ok: false as const, error: "Erro ao gerar o PDF do recibo" };
   }
@@ -401,4 +406,11 @@ export async function searchClients(query: string) {
     take: 15,
   });
   return customers;
+}
+
+export async function setReceiptPdfTheme(
+  receiptId: string,
+  pdfTheme: ReceiptPdfTheme,
+) {
+  return applyReceiptPdfTheme(receiptId, pdfTheme);
 }

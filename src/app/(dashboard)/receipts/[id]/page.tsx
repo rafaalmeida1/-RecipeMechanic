@@ -28,6 +28,7 @@ export default async function ReceiptPage({
     return (
       <ReceiptLinesEditor
         receiptId={receipt.id}
+        pdfTheme={receipt.pdfTheme}
         initialLines={receipt.lines.map((l) => ({
           kind: l.kind,
           description: l.description,
@@ -38,5 +39,7 @@ export default async function ReceiptPage({
     );
   }
 
-  return <ReceiptSummary receipt={receipt} pdfUrl={pdfUrl} />;
+  return (
+    <ReceiptSummary receipt={receipt} pdfUrl={pdfUrl} pdfTheme={receipt.pdfTheme} />
+  );
 }

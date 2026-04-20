@@ -8,7 +8,9 @@ import {
   PartyPopper,
   Share2,
 } from "lucide-react";
+import type { ReceiptPdfTheme } from "@prisma/client";
 import { sendReceiptPdfEmail } from "@/server/receipts/actions";
+import { ReceiptPdfThemePicker } from "@/components/receipt-pdf-theme-picker";
 import { formatCentsBRL } from "@/lib/money";
 import { formatPlateDisplay } from "@/lib/plate";
 import { sharePdfFileFromUrl } from "@/lib/share-pdf-client";
@@ -31,6 +33,7 @@ export function ReceiptDonePanel({
   serviceDateISO,
   totalCents,
   pdfUrl,
+  pdfTheme,
 }: {
   receiptId: string;
   customerEmail: string | null;
@@ -38,6 +41,7 @@ export function ReceiptDonePanel({
   serviceDateISO: string;
   totalCents: number;
   pdfUrl: string;
+  pdfTheme: ReceiptPdfTheme;
 }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -82,6 +86,10 @@ export function ReceiptDonePanel({
           link.
         </p>
       </header>
+
+      <Card className="border-primary/15 bg-muted/15 p-4 sm:p-6">
+        <ReceiptPdfThemePicker receiptId={receiptId} initialTheme={pdfTheme} />
+      </Card>
 
       <Card className="space-y-3 border-primary/10">
         {canNativeShare ? (

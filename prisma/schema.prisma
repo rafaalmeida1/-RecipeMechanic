@@ -22,6 +22,12 @@ enum ReceiptLineKind {
   SERVICE
 }
 
+/// Aparência do PDF deste recibo (por documento, não global).
+enum ReceiptPdfTheme {
+  DARK
+  LIGHT
+}
+
 model BusinessProfile {
   id           String   @id @default(cuid())
   legalName    String
@@ -121,7 +127,8 @@ model Receipt {
   customerNameSnap String?
   customerEmail    String?
   customerPhone    String?
-  totalCents       Int            @default(0)
+  totalCents       Int              @default(0)
+  pdfTheme         ReceiptPdfTheme  @default(LIGHT)
   finalizedAt      DateTime?
   emailSentAt      DateTime?
   lines            ReceiptLine[]

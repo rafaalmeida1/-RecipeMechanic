@@ -43,12 +43,16 @@ export async function GET(
   }
 
   try {
-    const buffer = await renderFinalizedReceiptPdfBuffer(receipt, {
-      legalName: business.legalName,
-      cnpj: business.cnpj,
-      phone: business.phone,
-      email: business.email,
-    });
+    const buffer = await renderFinalizedReceiptPdfBuffer(
+      receipt,
+      {
+        legalName: business.legalName,
+        cnpj: business.cnpj,
+        phone: business.phone,
+        email: business.email,
+      },
+      receipt.pdfTheme,
+    );
 
     if (!buffer.byteLength) {
       return new NextResponse("PDF vazio", { status: 500 });
