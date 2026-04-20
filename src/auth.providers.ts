@@ -69,9 +69,8 @@ export const authProviders: NextAuthConfig["providers"] = [
   }),
 ];
 
-export const authNodeCallbacks: Pick<
-  NonNullable<NextAuthConfig["callbacks"]>,
-  "signIn" | "jwt"
+export const authNodeCallbacks: Required<
+  Pick<NonNullable<NextAuthConfig["callbacks"]>, "signIn" | "jwt">
 > = {
   async signIn({ user, account }) {
     if (account?.provider === "email" && user.email) {

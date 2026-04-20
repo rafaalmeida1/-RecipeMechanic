@@ -49,9 +49,22 @@ export async function GET(
     },
     receipt,
   });
-  const buf = await pdf(doc).toBuffer();
+  const raw = await pdf(doc as Parameters<typeof pdf>[0]).toBuffer();
+  let bytes: Uint8Array;
+  if (raw instanceof ReadableStream) {
+    bytes = new Uint8Array(await new Response(raw).arrayBuffer());
+  } else {
+    const bin = raw as unknown as ArrayBuffer | ArrayBufferView;
+    bytes =
+      bin instanceof ArrayBuffer
+        ? new Uint8Array(bin)
+        : new Uint8Array(bin.buffer, bin.byteOffset, bin.byteLength);
+  }
 
-  return new NextResponse(buf, {
+  const body = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(body).set(bytes);
+
+  return new NextResponse(body, {
     headers: {
       "Content-Type": "application/pdf",
       "Content-Disposition": `inline; filename="recibo-${receipt.id}.pdf"`,

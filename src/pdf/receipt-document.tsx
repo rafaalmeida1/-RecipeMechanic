@@ -200,6 +200,7 @@ export function ReceiptPdfDocument({ business, receipt }: ReceiptPdfProps) {
         <View style={styles.headerRow}>
           <View style={styles.logoWrap}>
             {logo ? (
+              // eslint-disable-next-line jsx-a11y/alt-text -- @react-pdf/renderer Image is not DOM <img>
               <Image style={styles.logo} src={logo} />
             ) : (
               <View
