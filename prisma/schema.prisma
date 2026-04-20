@@ -1,0 +1,154 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MECHANIC
+}
+
+enum ReceiptStatus {
+  DRAFT
+  FINALIZED
+}
+
+model BusinessProfile {
+  id           String   @id @default(cuid())
+  legalName    String
+  cnpj         String
+  phone        String
+  email        String
+  pixDefault   String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model User {
+  id             String    @id @default(cuid())
+  name           String?
+  email          String    @unique
+  emailVerified  DateTime?
+  image          String?
+  passwordHash   String?
+  role           Role      @default(MECHANIC)
+  accounts       Account[]
+  sessions       Session[]
+  invitesCreated Invite[]  @relation("InviteCreatedBy")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String?
+  email     String?
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  vehicles  Vehicle[]
+}
+
+model Vehicle {
+  id              String    @id @default(cuid())
+  plateNormalized String    @unique
+  label           String
+  year            Int?
+  customerId      String
+  customer        Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  receipts        Receipt[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([customerId])
+}
+
+model Receipt {
+  id               String         @id @default(cuid())
+  status           ReceiptStatus  @default(DRAFT)
+  vehicleId        String
+  vehicle          Vehicle        @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  km               Int?
+  serviceDate      DateTime
+  pixKey           String
+  customerNameSnap String?
+  customerEmail    String?
+  customerPhone    String?
+  totalCents       Int            @default(0)
+  finalizedAt      DateTime?
+  emailSentAt      DateTime?
+  lines            ReceiptLine[]
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([vehicleId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ReceiptLine {
+  id            String  @id @default(cuid())
+  receiptId     String
+  receipt       Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  description   String
+  qty           Int
+  unitCents     Int
+  lineTotalCents Int
+  sortOrder     Int     @default(0)
+
+  @@index([receiptId])
+  @@index([description])
+}
+
+/// Admin-created invite for a new email (optional allowlist flow)
+model Invite {
+  id         String   @id @default(cuid())
+  email      String
+  role       Role
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdById String
+  createdBy   User     @relation("InviteCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@index([email])
+}
