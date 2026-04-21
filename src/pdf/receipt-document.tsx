@@ -21,6 +21,23 @@ function lineKindLabel(kind: ReceiptLineKind): string {
   return kind === ReceiptLineKind.SERVICE ? "Serviço" : "Peça";
 }
 
+function PdfCustomerField({
+  label,
+  value,
+  styles,
+}: {
+  label: string;
+  value: string;
+  styles: ReturnType<typeof getReceiptPdfStyles>;
+}) {
+  return (
+    <View style={styles.fieldBlock} wrap={false}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <Text style={styles.fieldValue}>{value}</Text>
+    </View>
+  );
+}
+
 export type ReceiptPdfProps = {
   business: {
     legalName: string;
@@ -53,37 +70,82 @@ export function ReceiptPdfDocument({
   const ref = receipt.id.replace(/[^a-z0-9]/gi, "").slice(-10).toUpperCase();
   const isLight = pdfTheme === "LIGHT";
 
+  const serviceDateStr = receipt.serviceDate.toLocaleDateString("pt-BR");
+
   const headerBlock = (
-    <>
-      <View style={styles.headerRow}>
-        <View style={styles.logoWrap}>
-          {logo ? (
-            // eslint-disable-next-line jsx-a11y/alt-text -- @react-pdf/renderer Image is not DOM <img>
-            <Image style={styles.logo} src={logo} />
-          ) : (
-            <View
-              style={{
-                width: 82,
-                height: 82,
-                borderRadius: 41,
-                borderWidth: 2,
-                borderColor: GOLD,
-                backgroundColor: isLight ? "#27272A" : "#141414",
-              }}
-            />
-          )}
+    <View style={styles.headerRow}>
+      <View style={styles.logoWrap}>
+        {logo ? (
+          // eslint-disable-next-line jsx-a11y/alt-text -- @react-pdf/renderer Image is not DOM <img>
+          <Image style={styles.logo} src={logo} />
+        ) : (
+          <View
+            style={{
+              width: 82,
+              height: 82,
+              borderRadius: 41,
+              borderWidth: 2,
+              borderColor: GOLD,
+              backgroundColor: isLight ? "#27272A" : "#141414",
+            }}
+          />
+        )}
+      </View>
+      <View style={styles.headerText}>
+        <Text style={styles.docKind}>Recibo de serviço</Text>
+        <View style={styles.metaRow}>
+          <Text style={styles.metaLabel}>Razão social:</Text>
+          <Text style={styles.metaValue}>{business.legalName}</Text>
         </View>
-        <View style={styles.headerText}>
-          <Text style={styles.brand}>RIBEIROCAR</Text>
-          <Text style={styles.docKind}>Recibo de serviço</Text>
-          <Text style={styles.metaLine}>Razão social: {business.legalName}</Text>
-          <Text style={styles.metaLine}>CNPJ: {business.cnpj}</Text>
-          <Text style={styles.metaLine}>Telefone: {business.phone}</Text>
-          <Text style={styles.metaLine}>E-mail: {business.email}</Text>
-          <Text style={styles.refLine}>Ref. documento: {ref}</Text>
+        <View style={styles.metaRow}>
+          <Text style={styles.metaLabel}>CNPJ:</Text>
+          <Text style={styles.metaValue}>{business.cnpj}</Text>
+        </View>
+        <View style={styles.metaRow}>
+          <Text style={styles.metaLabel}>Telefone:</Text>
+          <Text style={styles.metaValue}>{business.phone}</Text>
+        </View>
+        <View style={styles.metaRow}>
+          <Text style={styles.metaLabel}>E-mail:</Text>
+          <Text style={styles.metaValue}>{business.email}</Text>
+        </View>
+        <Text style={styles.refLine}>Ref. documento: {ref}</Text>
+      </View>
+    </View>
+  );
+
+  const customerBlock = (
+    <View style={styles.customerInCard}>
+      <View style={styles.twoCol}>
+        <View style={styles.col}>
+          <PdfCustomerField
+            label="Cliente"
+            value={customerName}
+            styles={styles}
+          />
+          <PdfCustomerField
+            label="Veículo"
+            value={receipt.vehicle.label.toUpperCase()}
+            styles={styles}
+          />
+          <PdfCustomerField label="Placa" value={plate.toUpperCase()} styles={styles} />
+          <PdfCustomerField
+            label="Ano"
+            value={receipt.vehicle.year ? String(receipt.vehicle.year) : "—"}
+            styles={styles}
+          />
+        </View>
+        <View style={styles.col}>
+          <PdfCustomerField label="PIX" value={receipt.pixKey} styles={styles} />
+          <PdfCustomerField
+            label="KM"
+            value={receipt.km != null ? String(receipt.km) : "—"}
+            styles={styles}
+          />
+          <PdfCustomerField label="DATA" value={serviceDateStr} styles={styles} />
         </View>
       </View>
-    </>
+    </View>
   );
 
   return (
@@ -91,44 +153,23 @@ export function ReceiptPdfDocument({
       <Page size="A4" style={styles.page}>
         {isLight ? (
           <View style={receiptPdfStylesLight.headerCard}>
-            <View style={receiptPdfStylesLight.goldBar} />
-            <View style={receiptPdfStylesLight.headerInner}>{headerBlock}</View>
+            <View style={receiptPdfStylesLight.goldBarInCard} />
+            <View style={receiptPdfStylesLight.headerInner}>
+              {headerBlock}
+              {customerBlock}
+            </View>
           </View>
         ) : (
-          <>
-            <View style={receiptPdfStylesDark.goldBar} />
-            {headerBlock}
-          </>
-        )}
-
-        <View style={styles.section}>
-          <View style={styles.twoCol}>
-            <View style={styles.col}>
-              <Text style={styles.label}>Cliente</Text>
-              <Text style={styles.value}>{customerName}</Text>
-              <Text style={styles.label}>Veículo</Text>
-              <Text style={styles.value}>{receipt.vehicle.label}</Text>
-              <Text style={styles.label}>Placa</Text>
-              <Text style={styles.value}>{plate}</Text>
-              <Text style={styles.label}>Ano</Text>
-              <Text style={styles.value}>
-                {receipt.vehicle.year ? String(receipt.vehicle.year) : "—"}
-              </Text>
-            </View>
-            <View style={styles.col}>
-              <Text style={styles.label}>PIX</Text>
-              <Text style={styles.value}>{receipt.pixKey}</Text>
-              <Text style={styles.label}>KM</Text>
-              <Text style={styles.value}>
-                {receipt.km != null ? String(receipt.km) : "—"}
-              </Text>
-              <Text style={styles.label}>Data do serviço</Text>
-              <Text style={styles.value}>
-                {receipt.serviceDate.toLocaleDateString("pt-BR")}
-              </Text>
+          <View style={receiptPdfStylesDark.combinedCard}>
+            <View style={receiptPdfStylesDark.goldBarInCard} />
+            <View style={receiptPdfStylesDark.combinedCardInner}>
+              {headerBlock}
+              {customerBlock}
             </View>
           </View>
-        </View>
+        )}
+
+        <View style={styles.sectionGoldDivider} />
 
         <Text style={styles.tableTitle}>Peças e serviços</Text>
         <View style={styles.tableHeader}>

@@ -18,16 +18,29 @@ export const receiptPdfStylesDark = StyleSheet.create({
     color: WHITE,
     backgroundColor: BLACK,
   },
-  goldBar: {
+  /** Faixa dourada no topo do card unificado (oficina + cliente). */
+  goldBarInCard: {
     height: 3,
     width: "100%",
     backgroundColor: GOLD,
-    marginBottom: 14,
+    marginBottom: 0,
+  },
+  combinedCard: {
+    borderWidth: 1,
+    borderColor: LINE_DARK,
+    borderRadius: 8,
+    marginBottom: 18,
+    overflow: "hidden",
+  },
+  combinedCardInner: {
+    paddingTop: 16,
+    paddingBottom: 16,
+    paddingHorizontal: 16,
   },
   headerRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    marginBottom: 16,
+    marginBottom: 0,
   },
   logoWrap: { width: 88, marginRight: 14 },
   logo: {
@@ -38,32 +51,48 @@ export const receiptPdfStylesDark = StyleSheet.create({
     borderColor: GOLD,
   },
   headerText: { flexGrow: 1, paddingTop: 2 },
-  brand: {
-    fontFamily: "Helvetica-Bold",
-    fontSize: 22,
-    letterSpacing: 2,
-    color: GOLD,
-    marginBottom: 2,
-  },
   docKind: {
     fontSize: 8,
     letterSpacing: 1.5,
     color: MUTED_DARK,
     textTransform: "uppercase",
-    marginBottom: 8,
+    marginBottom: 10,
   },
-  metaLine: { marginBottom: 3, color: WHITE, fontSize: 9 },
-  refLine: { marginTop: 6, fontSize: 8, color: MUTED_DARK },
-  section: {
-    borderWidth: 1.5,
-    borderColor: WHITE,
-    borderRadius: 6,
-    padding: 14,
-    marginBottom: 16,
+  metaRow: {
+    flexDirection: "row",
+    marginBottom: 5,
+    alignItems: "flex-start",
+  },
+  metaLabel: {
+    width: "26%",
+    fontFamily: "Helvetica-Bold",
+    fontSize: 8.5,
+    color: GOLD,
+  },
+  metaValue: {
+    width: "74%",
+    fontSize: 9,
+    color: WHITE,
+  },
+  refLine: { marginTop: 8, fontSize: 8, color: MUTED_DARK },
+  /** Cliente/veículo dentro do mesmo card escuro da oficina. */
+  customerInCard: {
+    marginTop: 12,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: LINE_DARK,
+  },
+  sectionGoldDivider: {
+    height: 3,
+    width: "100%",
+    backgroundColor: GOLD,
+    marginTop: 0,
+    marginBottom: 12,
   },
   twoCol: { flexDirection: "row" },
   col: { flexGrow: 1, width: "48%" },
-  label: {
+  fieldBlock: { marginBottom: 8 },
+  fieldLabel: {
     color: GOLD,
     fontFamily: "Helvetica-Bold",
     fontSize: 8,
@@ -71,7 +100,11 @@ export const receiptPdfStylesDark = StyleSheet.create({
     marginBottom: 2,
     letterSpacing: 0.5,
   },
-  value: { color: WHITE, marginBottom: 8, fontSize: 10 },
+  fieldValue: {
+    color: WHITE,
+    fontSize: 10,
+    lineHeight: 1.35,
+  },
   tableTitle: {
     fontFamily: "Helvetica-Bold",
     fontSize: 9,
@@ -165,10 +198,11 @@ export const receiptPdfStylesLight = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#27272A",
   },
-  goldBar: {
+  goldBarInCard: {
     height: 3,
     width: "100%",
     backgroundColor: GOLD,
+    marginBottom: 0,
   },
   headerInner: {
     paddingTop: 16,
@@ -178,6 +212,7 @@ export const receiptPdfStylesLight = StyleSheet.create({
   headerRow: {
     flexDirection: "row",
     alignItems: "flex-start",
+    marginBottom: 0,
   },
   logoWrap: { width: 88, marginRight: 14 },
   logo: {
@@ -188,41 +223,59 @@ export const receiptPdfStylesLight = StyleSheet.create({
     borderColor: GOLD,
   },
   headerText: { flexGrow: 1, paddingTop: 2 },
-  brand: {
-    fontFamily: "Helvetica-Bold",
-    fontSize: 22,
-    letterSpacing: 2,
-    color: GOLD,
-    marginBottom: 2,
-  },
   docKind: {
     fontSize: 8,
     letterSpacing: 1.5,
     color: "#A1A1AA",
     textTransform: "uppercase",
-    marginBottom: 8,
+    marginBottom: 10,
   },
-  metaLine: { marginBottom: 3, color: WHITE, fontSize: 9 },
-  refLine: { marginTop: 6, fontSize: 8, color: "#A1A1AA" },
-  section: {
-    borderWidth: 1,
-    borderColor: STONE_200,
-    borderRadius: 8,
-    padding: 14,
-    marginBottom: 16,
-    backgroundColor: WHITE,
+  metaRow: {
+    flexDirection: "row",
+    marginBottom: 5,
+    alignItems: "flex-start",
+  },
+  metaLabel: {
+    width: "26%",
+    fontFamily: "Helvetica-Bold",
+    fontSize: 8.5,
+    color: GOLD,
+  },
+  metaValue: {
+    width: "74%",
+    fontSize: 9,
+    color: WHITE,
+  },
+  refLine: { marginTop: 8, fontSize: 8, color: "#A1A1AA" },
+  customerInCard: {
+    marginTop: 12,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#3F3F46",
+  },
+  sectionGoldDivider: {
+    height: 3,
+    width: "100%",
+    backgroundColor: GOLD,
+    marginTop: 0,
+    marginBottom: 12,
   },
   twoCol: { flexDirection: "row" },
   col: { flexGrow: 1, width: "48%" },
-  label: {
-    color: AMBER_800,
+  fieldBlock: { marginBottom: 8 },
+  fieldLabel: {
+    color: GOLD,
     fontFamily: "Helvetica-Bold",
     fontSize: 8,
     textTransform: "uppercase",
     marginBottom: 2,
     letterSpacing: 0.5,
   },
-  value: { color: STONE_900, marginBottom: 8, fontSize: 10 },
+  fieldValue: {
+    color: WHITE,
+    fontSize: 10,
+    lineHeight: 1.35,
+  },
   tableTitle: {
     fontFamily: "Helvetica-Bold",
     fontSize: 9,

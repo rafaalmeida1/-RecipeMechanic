@@ -104,9 +104,10 @@ export function NewReceiptWizard({ pixDefault }: { pixDefault: string }) {
             <Input
               id="plate"
               value={plate}
-              onChange={(e) => setPlate(e.target.value)}
+              onChange={(e) => setPlate(e.target.value.toUpperCase())}
               placeholder="Ex.: ABC1D23"
               autoCapitalize="characters"
+              className="font-mono uppercase"
             />
             <p className="text-xs text-muted-foreground">
               Letras e números; pode digitar com ou sem hífen.
