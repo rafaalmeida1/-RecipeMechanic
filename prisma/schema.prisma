@@ -28,6 +28,13 @@ enum ReceiptPdfTheme {
   LIGHT
 }
 
+/// Forma de pagamento indicada no recibo (para o PDF e registo).
+enum ReceiptPaymentMethod {
+  PIX
+  CARTAO
+  OUTRO
+}
+
 model BusinessProfile {
   id           String   @id @default(cuid())
   legalName    String
@@ -46,10 +53,11 @@ model User {
   emailVerified  DateTime?
   image          String?
   passwordHash   String?
-  role           Role      @default(MECHANIC)
-  accounts       Account[]
-  sessions       Session[]
-  invitesCreated Invite[]  @relation("InviteCreatedBy")
+  role             Role     @default(MECHANIC)
+  accounts         Account[]
+  sessions         Session[]
+  passwordResets   PasswordResetToken[]
+  invitesCreated   Invite[] @relation("InviteCreatedBy")
 }
 
 model Account {
@@ -85,6 +93,18 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+/// Link descartável p/ redefinir senha (esqueci minha senha). Um ativo por fluxo; expira em 1h.
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expires   DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 model Customer {
@@ -129,6 +149,15 @@ model Receipt {
   customerPhone    String?
   totalCents       Int              @default(0)
   pdfTheme         ReceiptPdfTheme  @default(LIGHT)
+  /// Texto livre no PDF (por baixo dos itens), opcional.
+  receiptNote      String?          @db.Text
+  paymentMethod    ReceiptPaymentMethod @default(PIX)
+  /// Parcelas no cartão (1 = à vista). Ignorado se `paymentMethod` ≠ CARTAO.
+  cardInstallmentCount Int?
+  /// Se falso, o PDF omite o bloco "Total geral" e o resumo de pagamento; subtotais por bloco mantêm-se.
+  showGrandTotalOnPdf Boolean       @default(true)
+  /// Se verdade, o cliente já quitou as peças — o total a pagar/parcelas no recibo usam só mão de obra (serviços).
+  clientPaidForParts Boolean         @default(false)
   finalizedAt      DateTime?
   emailSentAt      DateTime?
   lines            ReceiptLine[]

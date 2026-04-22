@@ -34,6 +34,11 @@ export default async function ReceiptPage({
           qty: l.qty,
           unitCents: l.unitCents,
         }))}
+        initialReceiptNote={receipt.receiptNote ?? ""}
+        initialPaymentMethod={receipt.paymentMethod}
+        initialCardInstallmentCount={receipt.cardInstallmentCount}
+        initialShowGrandTotalOnPdf={receipt.showGrandTotalOnPdf}
+        initialClientPaidForParts={receipt.clientPaidForParts}
       />
     );
   }

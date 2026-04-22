@@ -10,6 +10,7 @@ import {
   Search,
   UserPlus,
   Wrench,
+  KeyRound,
 } from "lucide-react";
 import { OnlineStatus } from "@/components/online-status";
 import { SignOutForm } from "@/components/sign-out-button";
@@ -65,6 +66,12 @@ const items: NavItem[] = [
     description: "Link para novo usuário (admin)",
     icon: <UserPlus className="h-5 w-5" />,
     adminOnly: true,
+  },
+  {
+    href: "/account/password",
+    title: "Minha senha",
+    description: "Alterar senha da conta de login",
+    icon: <KeyRound className="h-5 w-5" />,
   },
 ];
 

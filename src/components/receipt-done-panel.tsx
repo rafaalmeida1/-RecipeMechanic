@@ -1,10 +1,12 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import {
   Download,
   Mail,
   MessageCircle,
+  Pencil,
   PartyPopper,
   Share2,
 } from "lucide-react";
@@ -32,6 +34,7 @@ export function ReceiptDonePanel({
   plateNormalized,
   serviceDateISO,
   totalCents,
+  clientAmountDueCents,
   pdfUrl,
   pdfTheme,
 }: {
@@ -39,7 +42,10 @@ export function ReceiptDonePanel({
   customerEmail: string | null;
   plateNormalized: string;
   serviceDateISO: string;
+  /** Soma de todos os itens (informativo, ex.: oficina). */
   totalCents: number;
+  /** O que o cliente ainda paga (parcelas e mensagem usam este). */
+  clientAmountDueCents: number;
   pdfUrl: string;
   pdfTheme: ReceiptPdfTheme;
 }) {
@@ -48,12 +54,15 @@ export function ReceiptDonePanel({
   const [pending, startTransition] = useTransition();
   const [shareBusy, setShareBusy] = useState(false);
 
-  const waText = useMemo(() => {
-    const d = new Date(serviceDateISO);
-    return encodeURIComponent(
-      `Olá! Segue seu recibo RIBEIROCAR (${formatPlateDisplay(plateNormalized)} · ${d.toLocaleDateString("pt-BR")}). Total: ${formatCentsBRL(totalCents)}.`,
-    );
-  }, [plateNormalized, serviceDateISO, totalCents]);
+  const clientShareMessage = useMemo(() => {
+    const plate = formatPlateDisplay(plateNormalized).toUpperCase();
+    return `Olá! Segue seu recibo ${plate} Total ${formatCentsBRL(clientAmountDueCents)}. PDF: `;
+  }, [plateNormalized, clientAmountDueCents]);
+
+  const waText = useMemo(
+    () => encodeURIComponent(clientShareMessage),
+    [clientShareMessage],
+  );
 
   const canNativeShare =
     typeof navigator !== "undefined" && typeof navigator.share === "function";
@@ -61,9 +70,9 @@ export function ReceiptDonePanel({
   const shareMeta = useMemo(
     () => ({
       title: "Recibo RIBEIROCAR",
-      text: `Recibo ${formatPlateDisplay(plateNormalized)} — ${formatCentsBRL(totalCents)}`,
+      text: clientShareMessage,
     }),
-    [plateNormalized, totalCents],
+    [clientShareMessage],
   );
 
   const fileName = useMemo(
@@ -82,9 +91,21 @@ export function ReceiptDonePanel({
         </h1>
         <p className="mx-auto max-w-md text-sm leading-relaxed text-muted-foreground sm:mx-0">
           Envie o <strong className="text-foreground">PDF em anexo</strong> (compartilhar ou
-          baixar). O e-mail do cliente recebe o arquivo junto com a mensagem — sem precisar abrir
-          link.
+          baixar). A mensagem abaixo usa o <strong className="text-foreground">que o cliente a
+          pagar</strong> (e as parcelas de cartão, se houver) — a mesma lógica do PDF.
         </p>
+        {clientAmountDueCents !== totalCents ? (
+          <p className="mx-auto max-w-md text-xs text-muted-foreground sm:mx-0">
+            Soma de todos os itens (referência): {formatCentsBRL(totalCents)}. Na mensagem e no
+            total a pagar: {formatCentsBRL(clientAmountDueCents)}.
+          </p>
+        ) : null}
+        <Button variant="outline" className="mx-auto w-full max-w-sm gap-2 sm:mx-0" asChild>
+          <Link href={`/receipts/${receiptId}/edit`}>
+            <Pencil className="h-4 w-4" />
+            Corrigir dados e refazer o recibo
+          </Link>
+        </Button>
       </header>
 
       <Card className="border-primary/15 bg-muted/15 p-4 sm:p-6">

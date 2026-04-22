@@ -1,6 +1,7 @@
 import { Document, Image, Page, Text, View } from "@react-pdf/renderer";
 import {
   ReceiptLineKind,
+  ReceiptPaymentMethod,
   ReceiptPdfTheme,
   type Receipt,
   type ReceiptLine,
@@ -10,6 +11,11 @@ import {
 import { formatPlateDisplay } from "@/lib/plate";
 import { formatCentsBRL } from "@/lib/money";
 import {
+  cardInstallmentSummaryPt,
+  getClientAmountDueCents,
+  subtotalsByKind,
+} from "@/lib/receipt-totals";
+import {
   getReceiptPdfStyles,
   receiptPdfStylesDark,
   receiptPdfStylesLight,
@@ -17,8 +23,18 @@ import {
 
 const GOLD = "#FFD700";
 
-function lineKindLabel(kind: ReceiptLineKind): string {
-  return kind === ReceiptLineKind.SERVICE ? "Serviço" : "Peça";
+function paymentBlockText(
+  method: ReceiptPaymentMethod,
+  totalCents: number,
+  cardInstallmentCount: number | null,
+): string {
+  if (method === ReceiptPaymentMethod.PIX) return "Forma de pagamento: PIX";
+  if (method === ReceiptPaymentMethod.OUTRO) {
+    return "Forma de pagamento: (outro)";
+  }
+  const n = cardInstallmentCount && cardInstallmentCount >= 1 ? cardInstallmentCount : 1;
+  if (n <= 1) return "Forma de pagamento: cartão à vista";
+  return `Forma de pagamento: ${cardInstallmentSummaryPt(totalCents, n)} (total: ${formatCentsBRL(totalCents)}).`;
 }
 
 function PdfCustomerField({
@@ -81,9 +97,9 @@ export function ReceiptPdfDocument({
         ) : (
           <View
             style={{
-              width: 82,
-              height: 82,
-              borderRadius: 41,
+              width: 64,
+              height: 64,
+              borderRadius: 32,
               borderWidth: 2,
               borderColor: GOLD,
               backgroundColor: isLight ? "#27272A" : "#141414",
@@ -171,39 +187,191 @@ export function ReceiptPdfDocument({
 
         <View style={styles.sectionGoldDivider} />
 
-        <Text style={styles.tableTitle}>Peças e serviços</Text>
-        <View style={styles.tableHeader}>
-          <Text style={[styles.colKind, styles.tableHeaderText]}>Tipo</Text>
-          <Text style={[styles.colPart, styles.tableHeaderText]}>Descrição</Text>
-          <Text style={[styles.colQty, styles.tableHeaderText]}>Qtd</Text>
-          <Text style={[styles.colUnit, styles.tableHeaderText]}>Valor unit.</Text>
-          <Text style={[styles.colTot, styles.tableHeaderText]}>Valor total</Text>
-        </View>
-        {receipt.lines.map((line, i) => (
-          <View
-            key={line.id}
-            style={i % 2 === 0 ? styles.tableRow : styles.tableRowAlt}
-            wrap={false}
-          >
-            <Text style={[styles.colKind, styles.tableCell]}>
-              {lineKindLabel(line.kind)}
-            </Text>
-            <Text style={[styles.colPart, styles.tableCell]}>{line.description}</Text>
-            <Text style={[styles.colQty, styles.tableCell]}>{line.qty}</Text>
-            <Text style={[styles.colUnit, styles.tableCell]}>
-              {formatCentsBRL(line.unitCents)}
-            </Text>
-            <Text style={[styles.colTot, styles.tableCell]}>
-              {formatCentsBRL(line.lineTotalCents)}
+        {(() => {
+          const parts = receipt.lines
+            .filter((l) => l.kind === ReceiptLineKind.PRODUCT)
+            .sort((a, b) => a.sortOrder - b.sortOrder);
+          const services = receipt.lines
+            .filter((l) => l.kind === ReceiptLineKind.SERVICE)
+            .sort((a, b) => a.sortOrder - b.sortOrder);
+          const { productCents, serviceCents } = subtotalsByKind(receipt.lines);
+          const showGrand = receipt.showGrandTotalOnPdf !== false;
+          const payMethod = receipt.paymentMethod ?? ReceiptPaymentMethod.PIX;
+          const hasPartAndService = parts.length > 0 && services.length > 0;
+          const partsPrepaid = receipt.clientPaidForParts === true;
+          const documentTotalCents = receipt.totalCents;
+          const clientDueCents = getClientAmountDueCents(
+            partsPrepaid,
+            documentTotalCents,
+            receipt.lines,
+          );
+          const showSomaGeral = partsPrepaid && documentTotalCents !== clientDueCents;
+
+          return (
+            <>
+              {parts.length > 0 ? (
+                <View style={styles.lineItemsGroup} wrap={false}>
+                  <Text style={styles.clientSectionTitle}>Peças</Text>
+                  <View style={styles.tableHeader}>
+                    <Text style={[styles.colPartsDesc, styles.tableHeaderText]}>
+                      Descrição
+                    </Text>
+                    <Text style={[styles.colPartsQty, styles.tableHeaderText]}>Qtd</Text>
+                    <Text style={[styles.colPartsUnit, styles.tableHeaderText]}>V. unit.</Text>
+                    <Text style={[styles.colPartsTot, styles.tableHeaderText]}>V. tot.</Text>
+                  </View>
+                  {parts.map((line, i) => (
+                    <View
+                      key={line.id}
+                      style={i % 2 === 0 ? styles.tableRow : styles.tableRowAlt}
+                      wrap={false}
+                    >
+                      <Text style={[styles.colPartsDesc, styles.tableCell]}>
+                        {line.description}
+                      </Text>
+                      <Text style={[styles.colPartsQty, styles.tableCell]}>{line.qty}</Text>
+                      <Text style={[styles.colPartsUnit, styles.tableCell]}>
+                        {formatCentsBRL(line.unitCents)}
+                      </Text>
+                      <Text style={[styles.colPartsTot, styles.tableCell]}>
+                        {formatCentsBRL(line.lineTotalCents)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+
+              {services.length > 0 ? (
+                <View
+                  style={
+                    parts.length > 0
+                      ? [styles.lineItemsGroup, styles.lineItemsGroupSpaced]
+                      : styles.lineItemsGroup
+                  }
+                  wrap={false}
+                >
+                  <Text style={styles.clientSectionTitle}>Serviço Técnico</Text>
+                  <View style={styles.tableHeader}>
+                    <Text style={[styles.colServDesc, styles.tableHeaderText]}>Descrição</Text>
+                    <Text style={[styles.colServVal, styles.tableHeaderText]}>Valor</Text>
+                  </View>
+                  {services.map((line, i) => (
+                    <View
+                      key={line.id}
+                      style={i % 2 === 0 ? styles.tableRow : styles.tableRowAlt}
+                      wrap={false}
+                    >
+                      <Text style={[styles.colServDesc, styles.tableCell]}>
+                        {line.description}
+                      </Text>
+                      <Text style={[styles.colServVal, styles.tableCell]}>
+                        {formatCentsBRL(line.lineTotalCents)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+
+              {showGrand ? (
+                <View style={styles.grandBlock} wrap={false}>
+                  <View style={styles.clientTotalsBlock} wrap={false}>
+                    {partsPrepaid ? (
+                      <>
+                        {productCents > 0 ? (
+                          <View style={styles.totalBreakdownRow} wrap={false}>
+                            <Text style={styles.totalBreakdownLabel}>
+                              Peças (valores informativos — já quitas)
+                            </Text>
+                            <Text style={styles.totalBreakdownValue}>
+                              {formatCentsBRL(productCents)}
+                            </Text>
+                          </View>
+                        ) : null}
+                        {serviceCents > 0 ? (
+                          <View style={styles.totalBreakdownRow} wrap={false}>
+                            <Text style={styles.totalBreakdownLabel}>Mão de obra</Text>
+                            <Text style={styles.totalBreakdownValue}>
+                              {formatCentsBRL(serviceCents)}
+                            </Text>
+                          </View>
+                        ) : null}
+                        {showSomaGeral ? (
+                          <View style={styles.totalDocumentGeralRow} wrap={false}>
+                            <Text style={styles.totalDocumentGeralText}>
+                              Soma geral (todos os itens): {formatCentsBRL(documentTotalCents)}
+                            </Text>
+                          </View>
+                        ) : null}
+                        <View
+                          style={
+                            productCents > 0 || serviceCents > 0
+                              ? [styles.totalToPayRow, styles.totalToPayRowGapped]
+                              : styles.totalToPayRow
+                          }
+                          wrap={false}
+                        >
+                          <Text style={styles.totalToPayLabel}>Total a pagar</Text>
+                          <Text style={styles.totalToPayValue}>
+                            {formatCentsBRL(clientDueCents)}
+                          </Text>
+                        </View>
+                      </>
+                    ) : hasPartAndService ? (
+                      <>
+                        <View style={styles.totalBreakdownRow} wrap={false}>
+                          <Text style={styles.totalBreakdownLabel}>Peças</Text>
+                          <Text style={styles.totalBreakdownValue}>
+                            {formatCentsBRL(productCents)}
+                          </Text>
+                        </View>
+                        <View style={styles.totalBreakdownRow} wrap={false}>
+                          <Text style={styles.totalBreakdownLabel}>Mão de obra</Text>
+                          <Text style={styles.totalBreakdownValue}>
+                            {formatCentsBRL(serviceCents)}
+                          </Text>
+                        </View>
+                        <View
+                          style={[styles.totalToPayRow, styles.totalToPayRowGapped]}
+                          wrap={false}
+                        >
+                          <Text style={styles.totalToPayLabel}>Total</Text>
+                          <Text style={styles.totalToPayValue}>
+                            {formatCentsBRL(documentTotalCents)}
+                          </Text>
+                        </View>
+                      </>
+                    ) : (
+                      <View style={styles.totalToPayRow} wrap={false}>
+                        <Text style={styles.totalToPayLabel}>Total</Text>
+                        <Text style={styles.totalToPayValue}>
+                          {formatCentsBRL(documentTotalCents)}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.totalPaymentBlock} wrap={false}>
+                    <Text style={styles.paymentLine} wrap>
+                      {paymentBlockText(
+                        payMethod,
+                        clientDueCents,
+                        receipt.cardInstallmentCount,
+                      )}
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
+            </>
+          );
+        })()}
+
+        {receipt.receiptNote?.trim() ? (
+          <View style={styles.noteBox} wrap={false}>
+            <Text style={styles.noteLabel}>Observação</Text>
+            <Text style={styles.noteText} wrap>
+              {receipt.receiptNote.trim()}
             </Text>
           </View>
-        ))}
-
-        <View style={styles.totals}>
-          <Text style={styles.totalLine}>
-            Total geral: {formatCentsBRL(receipt.totalCents)}
-          </Text>
-        </View>
+        ) : null}
 
         <View style={styles.footer}>
           <Text style={styles.footerText}>

@@ -11,6 +11,7 @@ const protectedPrefixes = [
   "/receipts",
   "/search",
   "/invites",
+  "/account",
 ];
 
 export default auth((req) => {

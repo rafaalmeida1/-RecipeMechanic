@@ -153,9 +153,11 @@ export async function flushReceiptOutbox(): Promise<{
           clientDraftKey: r.localId,
         });
       } else if (r.kind === "lines" && r.lines) {
+        const { lines, receiptId, ...meta } = r.lines;
         const res = await saveReceiptDraft({
-          receiptId: r.lines.receiptId,
-          lines: r.lines.lines,
+          receiptId,
+          lines,
+          ...meta,
         });
         if (!res.ok) {
           await updateDraftRecord(r.localId, { syncStatus: "failed", lastError: res.error });

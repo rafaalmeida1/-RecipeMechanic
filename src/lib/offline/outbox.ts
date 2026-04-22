@@ -3,7 +3,7 @@
  * além de filas legadas wizard/lines.
  */
 
-import type { ReceiptLineKind } from "@prisma/client";
+import type { ReceiptLineKind, ReceiptPaymentMethod } from "@prisma/client";
 
 const DB_NAME = "ribeirocar-offline-v2";
 const STORE = "receipt-outbox";
@@ -36,6 +36,11 @@ export type LineSyncPayload = {
     qty: number;
     unitCents: number;
   }>;
+  receiptNote?: string;
+  paymentMethod?: ReceiptPaymentMethod;
+  cardInstallmentCount?: number | null;
+  showGrandTotalOnPdf?: boolean;
+  clientPaidForParts?: boolean;
 };
 
 export type OutboxRecord = {

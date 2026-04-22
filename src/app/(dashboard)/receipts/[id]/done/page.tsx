@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import prisma from "@/lib/db";
 import { ReceiptDonePanel } from "@/components/receipt-done-panel";
+import { getClientAmountDueCents } from "@/lib/receipt-totals";
 import { signReceiptPdfAccess } from "@/lib/receipt-pdf-token";
 
 export default async function ReceiptDonePage({
@@ -11,7 +12,7 @@ export default async function ReceiptDonePage({
   const { id } = await params;
   const receipt = await prisma.receipt.findUnique({
     where: { id },
-    include: { vehicle: true },
+    include: { vehicle: true, lines: { orderBy: { sortOrder: "asc" } } },
   });
   if (!receipt) notFound();
   if (receipt.status !== "FINALIZED") redirect(`/receipts/${id}`);
@@ -21,6 +22,12 @@ export default async function ReceiptDonePage({
   const token = signReceiptPdfAccess(receipt.id);
   const pdfUrl = `${origin}/api/receipts/${receipt.id}/pdf?t=${encodeURIComponent(token)}`;
 
+  const clientAmountDueCents = getClientAmountDueCents(
+    receipt.clientPaidForParts,
+    receipt.totalCents,
+    receipt.lines,
+  );
+
   return (
     <ReceiptDonePanel
       receiptId={receipt.id}
@@ -28,6 +35,7 @@ export default async function ReceiptDonePage({
       plateNormalized={receipt.vehicle.plateNormalized}
       serviceDateISO={receipt.serviceDate.toISOString()}
       totalCents={receipt.totalCents}
+      clientAmountDueCents={clientAmountDueCents}
       pdfUrl={pdfUrl}
       pdfTheme={receipt.pdfTheme}
     />

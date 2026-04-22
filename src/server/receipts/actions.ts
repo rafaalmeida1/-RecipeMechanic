@@ -8,8 +8,19 @@ import { sendHtmlEmail, smtpErrorToUserMessage } from "@/lib/mail";
 import { renderFinalizedReceiptPdfBuffer } from "@/lib/pdf/render-receipt-pdf-server";
 import { normalizePlate } from "@/lib/plate";
 import { z } from "zod";
-import { ReceiptLineKind, ReceiptPdfTheme } from "@prisma/client";
+import { ReceiptLineKind, ReceiptPaymentMethod, ReceiptPdfTheme } from "@prisma/client";
 import { setReceiptPdfTheme as applyReceiptPdfTheme } from "./set-receipt-pdf-theme";
+
+function normalizePaymentFields(
+  method: ReceiptPaymentMethod,
+  count: number | null | undefined,
+): { paymentMethod: ReceiptPaymentMethod; cardInstallmentCount: number | null } {
+  if (method === ReceiptPaymentMethod.CARTAO) {
+    const c = count != null && count >= 1 && count <= 12 ? count : 1;
+    return { paymentMethod: ReceiptPaymentMethod.CARTAO, cardInstallmentCount: c };
+  }
+  return { paymentMethod: method, cardInstallmentCount: null };
+}
 
 const lineSchema = z.object({
   id: z.string().optional(),
@@ -185,6 +196,11 @@ const draftSchema = z.object({
   customerPhone: z.string().max(40).optional().or(z.literal("")).optional(),
   km: z.number().int().min(0).max(9999999).nullable().optional(),
   pixKey: z.string().min(1).max(120).optional(),
+  receiptNote: z.string().max(2000).optional().or(z.literal("")).optional(),
+  paymentMethod: z.nativeEnum(ReceiptPaymentMethod).optional(),
+  cardInstallmentCount: z.number().int().min(1).max(12).nullable().optional(),
+  showGrandTotalOnPdf: z.boolean().optional(),
+  clientPaidForParts: z.boolean().optional(),
 });
 
 export async function saveReceiptDraft(input: z.infer<typeof draftSchema>) {
@@ -197,6 +213,14 @@ export async function saveReceiptDraft(input: z.infer<typeof draftSchema>) {
   if (!existing || existing.status !== "DRAFT") {
     return { ok: false as const, error: "Recibo não encontrado" };
   }
+
+  const pay =
+    rest.paymentMethod != null
+      ? normalizePaymentFields(rest.paymentMethod, rest.cardInstallmentCount)
+      : {
+          paymentMethod: existing.paymentMethod,
+          cardInstallmentCount: existing.cardInstallmentCount,
+        };
 
   const computedLines = lines.map((l, idx) => {
     const lineTotalCents = l.qty * l.unitCents;
@@ -231,6 +255,7 @@ export async function saveReceiptDraft(input: z.infer<typeof draftSchema>) {
       where: { id: receiptId },
       data: {
         totalCents,
+        ...pay,
         ...(rest.customerNameSnap
           ? { customerNameSnap: rest.customerNameSnap }
           : {}),
@@ -242,10 +267,141 @@ export async function saveReceiptDraft(input: z.infer<typeof draftSchema>) {
           : {}),
         ...(rest.km !== undefined ? { km: rest.km } : {}),
         ...(rest.pixKey ? { pixKey: rest.pixKey } : {}),
+        ...(rest.receiptNote !== undefined
+          ? { receiptNote: rest.receiptNote.trim() || null }
+          : {}),
+        ...(rest.showGrandTotalOnPdf !== undefined
+          ? { showGrandTotalOnPdf: rest.showGrandTotalOnPdf }
+          : {}),
+        ...(rest.clientPaidForParts !== undefined
+          ? { clientPaidForParts: rest.clientPaidForParts }
+          : {}),
       },
     });
   });
 
+  return { ok: true as const, totalCents };
+}
+
+const updateFinalizedSchema = z.object({
+  receiptId: z.string().min(1),
+  lines: z.array(lineSchema).max(200),
+  customerNameSnap: z.string().min(1).max(120),
+  customerEmail: z.union([z.literal(""), z.string().email()]),
+  customerPhone: z.string().max(40).default(""),
+  vehicleLabel: z.string().min(1).max(120),
+  year: z.string().optional(),
+  serviceDate: z.string().min(8),
+  km: z.number().int().min(0).max(9999999).nullable().optional(),
+  pixKey: z.string().min(1).max(120),
+  receiptNote: z.string().max(2000).optional().or(z.literal("")).optional(),
+  paymentMethod: z.nativeEnum(ReceiptPaymentMethod),
+  cardInstallmentCount: z.number().int().min(1).max(12).nullable().optional(),
+  showGrandTotalOnPdf: z.boolean(),
+  clientPaidForParts: z.boolean(),
+});
+
+export async function updateFinalizedReceipt(input: z.infer<typeof updateFinalizedSchema>) {
+  await requireUser();
+  const parsed = updateFinalizedSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false as const, error: "Dados inválidos" };
+  }
+  const data = parsed.data;
+
+  const yearParsed =
+    data.year && data.year.trim() ? Number.parseInt(data.year, 10) : null;
+  const year =
+    yearParsed && Number.isFinite(yearParsed) && yearParsed >= 1950 && yearParsed <= 2035
+      ? yearParsed
+      : null;
+
+  const serviceDate = new Date(`${data.serviceDate}T12:00:00`);
+  const pay = normalizePaymentFields(
+    data.paymentMethod,
+    data.cardInstallmentCount,
+  );
+
+  const computedLines = data.lines.map((l, idx) => {
+    const lineTotalCents = l.qty * l.unitCents;
+    return {
+      kind: l.kind,
+      description: l.description,
+      qty: l.qty,
+      unitCents: l.unitCents,
+      lineTotalCents,
+      sortOrder: idx,
+    };
+  });
+
+  const totalCents = computedLines.reduce((s, l) => s + l.lineTotalCents, 0);
+  if (computedLines.length === 0) {
+    return { ok: false as const, error: "Deve haver ao menos uma peça ou serviço" };
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const receipt = await tx.receipt.findUnique({
+        where: { id: data.receiptId },
+        include: { vehicle: { include: { customer: true } } },
+      });
+      if (!receipt || receipt.status !== "FINALIZED") {
+        throw new Error("NOT_FOUND");
+      }
+
+      await tx.receiptLine.deleteMany({ where: { receiptId: data.receiptId } });
+      await tx.receiptLine.createMany({
+        data: computedLines.map((l) => ({
+          receiptId: data.receiptId,
+          kind: l.kind,
+          description: l.description,
+          qty: l.qty,
+          unitCents: l.unitCents,
+          lineTotalCents: l.lineTotalCents,
+          sortOrder: l.sortOrder,
+        })),
+      });
+
+      await tx.customer.update({
+        where: { id: receipt.vehicle.customerId },
+        data: {
+          name: data.customerNameSnap,
+          email: data.customerEmail || null,
+          phone: data.customerPhone || null,
+        },
+      });
+      await tx.vehicle.update({
+        where: { id: receipt.vehicleId },
+        data: { label: data.vehicleLabel, year },
+      });
+
+      await tx.receipt.update({
+        where: { id: data.receiptId },
+        data: {
+          totalCents,
+          serviceDate,
+          km: data.km ?? null,
+          pixKey: data.pixKey,
+          customerNameSnap: data.customerNameSnap,
+          customerEmail: data.customerEmail || null,
+          customerPhone: data.customerPhone || null,
+          receiptNote: data.receiptNote?.trim() || null,
+          showGrandTotalOnPdf: data.showGrandTotalOnPdf,
+          clientPaidForParts: data.clientPaidForParts,
+          ...pay,
+        },
+      });
+    });
+  } catch (e) {
+    if (e instanceof Error && e.message === "NOT_FOUND") {
+      return { ok: false as const, error: "Recibo não encontrado" };
+    }
+    throw e;
+  }
+
+  revalidatePath(`/receipts/${data.receiptId}`);
+  revalidatePath(`/receipts/${data.receiptId}/edit`);
+  revalidatePath(`/receipts/${data.receiptId}/done`);
   return { ok: true as const, totalCents };
 }
 

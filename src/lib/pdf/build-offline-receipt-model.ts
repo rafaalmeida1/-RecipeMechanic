@@ -1,4 +1,5 @@
 import {
+  ReceiptPaymentMethod,
   ReceiptPdfTheme,
   ReceiptStatus,
   type Receipt,
@@ -86,6 +87,11 @@ export function buildOfflineReceiptPdfModel(
     customerEmail: wizard.customerEmail || null,
     customerPhone: wizard.customerPhone || null,
     totalCents,
+    receiptNote: null,
+    paymentMethod: ReceiptPaymentMethod.PIX,
+    cardInstallmentCount: null,
+    showGrandTotalOnPdf: true,
+    clientPaidForParts: false,
     finalizedAt: null,
     emailSentAt: null,
     pdfTheme: ReceiptPdfTheme.LIGHT,

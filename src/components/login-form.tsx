@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { signIn } from "next-auth/react";
 import { KeyRound, Mail, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -66,9 +67,19 @@ export function LoginForm() {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Só se você já criou uma senha"
           />
-          <p className="text-xs text-muted-foreground">
-            Sem senha? Use o link mágico no e-mail — é o jeito mais fácil.
-          </p>
+          <div className="flex flex-col gap-0.5">
+            <p className="text-xs text-muted-foreground">
+              Sem senha? Use o link mágico no e-mail — é o jeito mais fácil.
+            </p>
+            <p className="text-xs">
+              <Link
+                href="/forgot-password"
+                className="text-primary font-medium underline-offset-2 hover:underline"
+              >
+                Esqueci minha senha
+              </Link>
+            </p>
+          </div>
         </div>
 
         {error ? (

@@ -2,52 +2,32 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouterWithLoading } from "@/components/navigation-progress";
-import {
-  finalizeReceipt,
-  saveReceiptDraft,
-  suggestParts,
-} from "@/server/receipts/actions";
+import { finalizeReceipt, saveReceiptDraft } from "@/server/receipts/actions";
 import { OFFLINE_SYNC_EVENT, enqueueLinesDraft } from "@/lib/offline/receipt-sync";
 import { formatCentsBRL, parseMoneyToCents } from "@/lib/money";
-import { ReceiptLineKind } from "@prisma/client";
-import { CircleDollarSign, Loader2, Plus, Trash2 } from "lucide-react";
+import { getClientAmountDueCents } from "@/lib/receipt-totals";
+import { ReceiptLineKind, ReceiptPaymentMethod } from "@prisma/client";
+import { CircleDollarSign, Loader2, Plus } from "lucide-react";
+import {
+  DraftLine,
+  LineRow,
+  linesSignature,
+  newReceiptLine,
+} from "@/components/receipt-line-row";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-
-export type DraftLine = {
-  clientId: string;
-  kind: ReceiptLineKind;
-  description: string;
-  unitMoney: string;
-  qty: string;
-};
-
-function newLine(): DraftLine {
-  return {
-    clientId: Math.random().toString(36).slice(2),
-    kind: ReceiptLineKind.PRODUCT,
-    description: "",
-    unitMoney: "",
-    qty: "1",
-  };
-}
-
-function linesSignature(lines: DraftLine[]) {
-  return JSON.stringify(
-    lines.map((l) => ({
-      k: l.kind,
-      d: l.description,
-      u: l.unitMoney,
-      q: l.qty,
-    })),
-  );
-}
+import { cn } from "@/lib/utils";
 
 export function ReceiptLinesEditor({
   receiptId,
   initialLines,
+  initialReceiptNote,
+  initialPaymentMethod,
+  initialCardInstallmentCount,
+  initialShowGrandTotalOnPdf,
+  initialClientPaidForParts,
 }: {
   receiptId: string;
   initialLines: Array<{
@@ -56,12 +36,17 @@ export function ReceiptLinesEditor({
     qty: number;
     unitCents: number;
   }>;
+  initialReceiptNote: string;
+  initialPaymentMethod: ReceiptPaymentMethod;
+  initialCardInstallmentCount: number | null;
+  initialShowGrandTotalOnPdf: boolean;
+  initialClientPaidForParts: boolean;
 }) {
   const router = useRouterWithLoading();
   const [pending, startTransition] = useTransition();
   const [backPending, startBackTransition] = useTransition();
   const [lines, setLines] = useState<DraftLine[]>(() => {
-    if (!initialLines.length) return [newLine()];
+    if (!initialLines.length) return [newReceiptLine()];
     return initialLines.map((l) => ({
       clientId: Math.random().toString(36).slice(2),
       kind: l.kind,
@@ -70,6 +55,17 @@ export function ReceiptLinesEditor({
       qty: String(l.qty),
     }));
   });
+  const [receiptNote, setReceiptNote] = useState(initialReceiptNote);
+  const [paymentMethod, setPaymentMethod] = useState<ReceiptPaymentMethod>(initialPaymentMethod);
+  const [cardInstallmentCount, setCardInstallmentCount] = useState(
+    String(initialCardInstallmentCount && initialCardInstallmentCount > 0 ? initialCardInstallmentCount : 1),
+  );
+  const [showGrandTotalOnPdf, setShowGrandTotalOnPdf] = useState(
+    initialShowGrandTotalOnPdf,
+  );
+  const [clientPaidForParts, setClientPaidForParts] = useState(
+    initialClientPaidForParts,
+  );
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [offlineQueued, setOfflineQueued] = useState(false);
@@ -97,10 +93,35 @@ export function ReceiptLinesEditor({
     return total;
   }, [lines]);
 
-  const persist = useCallback(async () => {
-    const sig = linesSignature(lines);
-    if (sig === lastSavedSig.current) return true;
+  const clientDuePreviewCents = useMemo(() => {
+    const withTotals = lines
+      .map((l) => {
+        const unitCents = parseMoneyToCents(l.unitMoney);
+        const qty = Number.parseInt(l.qty, 10);
+        if (
+          !l.description.trim() ||
+          unitCents === null ||
+          !Number.isFinite(qty) ||
+          qty <= 0
+        ) {
+          return null;
+        }
+        return { kind: l.kind, lineTotalCents: unitCents * qty };
+      })
+      .filter(Boolean) as Array<{
+        kind: ReceiptLineKind;
+        lineTotalCents: number;
+      }>;
+    return getClientAmountDueCents(
+      clientPaidForParts,
+      withTotals.reduce((s, l) => s + l.lineTotalCents, 0),
+      withTotals,
+    );
+  }, [lines, clientPaidForParts]);
 
+  const buildDraftPayload = useCallback(() => {
+    const sig = linesSignature(lines);
+    const noteSig = `${receiptNote}|${paymentMethod}|${cardInstallmentCount}|${showGrandTotalOnPdf}|${clientPaidForParts}`;
     const parsedLines = lines
       .map((l) => {
         const unitCents = parseMoneyToCents(l.unitMoney);
@@ -121,23 +142,46 @@ export function ReceiptLinesEditor({
         };
       })
       .filter(Boolean) as Array<{
-        kind: ReceiptLineKind;
-        description: string;
-        qty: number;
-        unitCents: number;
-      }>;
+      kind: ReceiptLineKind;
+      description: string;
+      qty: number;
+      unitCents: number;
+    }>;
+    return { sig, noteSig, parsedLines };
+  }, [lines, receiptNote, paymentMethod, cardInstallmentCount, showGrandTotalOnPdf, clientPaidForParts]);
+
+  const persist = useCallback(async () => {
+    const { sig, noteSig, parsedLines } = buildDraftPayload();
+    if (`${sig}|${noteSig}` === lastSavedSig.current) return true;
+
+    const nInstallments = Math.min(
+      12,
+      Math.max(1, Number.parseInt(cardInstallmentCount, 10) || 1),
+    );
+    const meta = {
+      receiptNote: receiptNote.slice(0, 2000),
+      paymentMethod,
+      cardInstallmentCount:
+        paymentMethod === ReceiptPaymentMethod.CARTAO ? nInstallments : null,
+      showGrandTotalOnPdf,
+      clientPaidForParts,
+    };
 
     setSaving(true);
     try {
       if (typeof navigator !== "undefined" && !navigator.onLine) {
-        await enqueueLinesDraft({ receiptId, lines: parsedLines });
+        await enqueueLinesDraft({
+          receiptId,
+          lines: parsedLines,
+          ...meta,
+        });
         setOfflineQueued(true);
-        lastSavedSig.current = sig;
+        lastSavedSig.current = `${sig}|${noteSig}`;
         setError(null);
         try {
           localStorage.setItem(
             `ribeirocar:draft:${receiptId}`,
-            JSON.stringify({ lines, savedAt: Date.now() }),
+            JSON.stringify({ lines, receiptNote, meta, savedAt: Date.now() }),
           );
         } catch {
           // ignore
@@ -145,18 +189,22 @@ export function ReceiptLinesEditor({
         return true;
       }
 
-      const res = await saveReceiptDraft({ receiptId, lines: parsedLines });
+      const res = await saveReceiptDraft({
+        receiptId,
+        lines: parsedLines,
+        ...meta,
+      });
       if (!res.ok) {
         setError(res.error);
         return false;
       }
       setOfflineQueued(false);
-      lastSavedSig.current = sig;
+      lastSavedSig.current = `${sig}|${noteSig}`;
       setError(null);
       try {
         localStorage.setItem(
           `ribeirocar:draft:${receiptId}`,
-          JSON.stringify({ lines, savedAt: Date.now() }),
+          JSON.stringify({ lines, receiptNote, meta, savedAt: Date.now() }),
         );
       } catch {
         // ignore
@@ -164,16 +212,16 @@ export function ReceiptLinesEditor({
       return true;
     } catch {
       try {
-        await enqueueLinesDraft({ receiptId, lines: parsedLines });
+        await enqueueLinesDraft({ receiptId, lines: parsedLines, ...meta });
         setOfflineQueued(true);
-        lastSavedSig.current = sig;
+        lastSavedSig.current = `${sig}|${noteSig}`;
         setError(
           "Sem conexão: alterações na fila deste aparelho. Sincronizam ao voltar a internet.",
         );
         try {
           localStorage.setItem(
             `ribeirocar:draft:${receiptId}`,
-            JSON.stringify({ lines, savedAt: Date.now() }),
+            JSON.stringify({ lines, receiptNote, meta, savedAt: Date.now() }),
           );
         } catch {
           // ignore
@@ -186,7 +234,16 @@ export function ReceiptLinesEditor({
     } finally {
       setSaving(false);
     }
-  }, [lines, receiptId]);
+  }, [
+    buildDraftPayload,
+    cardInstallmentCount,
+    lines,
+    paymentMethod,
+    receiptId,
+    receiptNote,
+    showGrandTotalOnPdf,
+    clientPaidForParts,
+  ]);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -199,9 +256,7 @@ export function ReceiptLinesEditor({
     <div className="space-y-8">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
-          <p className="text-xs font-medium uppercase tracking-widest text-primary">
-            Etapa 3
-          </p>
+          <p className="text-xs font-medium uppercase tracking-widest text-primary">Etapa 3</p>
           <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
             Peças e valores
           </h1>
@@ -243,7 +298,7 @@ export function ReceiptLinesEditor({
             }}
             onRemove={() => {
               setLines((prev) => {
-                if (prev.length === 1) return [newLine()];
+                if (prev.length === 1) return [newReceiptLine()];
                 return prev.filter((l) => l.clientId !== line.clientId);
               });
             }}
@@ -255,18 +310,123 @@ export function ReceiptLinesEditor({
             type="button"
             variant="outline"
             className="gap-2"
-            onClick={() => setLines((prev) => [...prev, newLine()])}
+            onClick={() => setLines((prev) => [...prev, newReceiptLine()])}
           >
             <Plus className="h-4 w-4" />
             Adicionar linha
           </Button>
-          <div className="flex items-center gap-2 text-base md:text-sm">
-            <CircleDollarSign className="h-4 w-4 shrink-0 text-primary" aria-hidden />
-            <span className="text-muted-foreground">Total (prévia)</span>
-            <span className="font-medium tabular-nums text-foreground">
-              {formatCentsBRL(totalsPreview)}
-            </span>
+          <div className="flex flex-col items-end gap-0.5 text-sm md:text-sm">
+            <div className="flex items-center gap-2">
+              <CircleDollarSign className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+              <span className="text-muted-foreground">Soma dos itens (prévia)</span>
+              <span className="font-medium tabular-nums text-foreground">
+                {formatCentsBRL(totalsPreview)}
+              </span>
+            </div>
+            {clientPaidForParts ? (
+              <div className="flex items-center gap-2 text-foreground">
+                <span className="text-muted-foreground">A pagar pelo cliente (prévia):</span>
+                <span className="font-semibold tabular-nums text-primary">
+                  {formatCentsBRL(clientDuePreviewCents)}
+                </span>
+              </div>
+            ) : null}
           </div>
+        </div>
+
+        <div className="space-y-3 border-t border-border/60 pt-5">
+          <h2 className="text-sm font-semibold text-foreground">Observação no recibo (opcional)</h2>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Esta nota aparece <strong className="text-foreground">no PDF, por baixo dos itens</strong>.
+            Use para avisos, garantia ou lembretes — o cliente e a oficina veem o que você
+            escrever aqui.
+          </p>
+          <textarea
+            id="receipt-note"
+            name="receiptNote"
+            value={receiptNote}
+            onChange={(e) => setReceiptNote(e.target.value)}
+            maxLength={2000}
+            rows={4}
+            className={cn(
+              "flex w-full min-h-[100px] rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm",
+              "ring-offset-background placeholder:text-muted-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+              "disabled:cursor-not-allowed disabled:opacity-50",
+            )}
+            placeholder="Ex.: Prazo de garantia da peça: 90 dias. Freios alinhados; recomendar troca de fluido no próximo serviço…"
+          />
+        </div>
+
+        <div className="space-y-4 border-t border-border/60 pt-5">
+          <h2 className="text-sm font-semibold text-foreground">Pagamento e totais no PDF</h2>
+          <p className="text-xs text-muted-foreground">
+            A forma de pagamento sai no recibo com o <strong className="text-foreground">valor a
+            pagar pelo cliente</strong> (total a pagar, parcelas no cartão, etc.). Ajuste abaixo
+            se as peças já foram quitas à parte.
+          </p>
+          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/60 p-3">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 rounded border-input"
+              checked={clientPaidForParts}
+              onChange={(e) => setClientPaidForParts(e.target.checked)}
+            />
+            <span className="text-sm leading-snug text-foreground">
+              <span className="font-medium">O cliente já pagou as peças?</span>
+              <span className="mt-1 block text-xs text-muted-foreground">
+                Se sim, o recibo considera que ele só ainda paga a <em>mão de obra (serviços)</em> —
+                total a pagar, parcelas e a mensagem de partilha usam esse valor (as peças
+                permanecem listadas no PDF, como referência).
+              </span>
+            </span>
+          </label>
+          <p className="text-xs text-muted-foreground">
+            Cartão: informe em quantas vezes a cobrança (sobre o valor a pagar pelo cliente).
+          </p>
+          <div className="space-y-2">
+            <Label htmlFor="payment-method">Como o cliente pagou</Label>
+            <select
+              id="payment-method"
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              value={paymentMethod}
+              onChange={(e) => setPaymentMethod(e.target.value as ReceiptPaymentMethod)}
+            >
+              <option value={ReceiptPaymentMethod.PIX}>PIX</option>
+              <option value={ReceiptPaymentMethod.CARTAO}>Cartão</option>
+              <option value={ReceiptPaymentMethod.OUTRO}>Outro (dinheiro, transferência…)</option>
+            </select>
+          </div>
+          {paymentMethod === ReceiptPaymentMethod.CARTAO ? (
+            <div className="space-y-2">
+              <Label htmlFor="card-installments">Quantas vezes (parcelas no cartão)</Label>
+              <Input
+                id="card-installments"
+                inputMode="numeric"
+                value={cardInstallmentCount}
+                onChange={(e) => setCardInstallmentCount(e.target.value.replace(/\D/g, ""))}
+                placeholder="1 a 12"
+                min={1}
+                max={12}
+              />
+              <p className="text-[11px] text-muted-foreground">1 = à vista no cartão. De 2 a 12 = parcelado.</p>
+            </div>
+          ) : null}
+          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/60 p-3">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 rounded border-input"
+              checked={showGrandTotalOnPdf}
+              onChange={(e) => setShowGrandTotalOnPdf(e.target.checked)}
+            />
+            <span className="text-sm leading-snug text-foreground">
+              <span className="font-medium">Mostrar &quot;Total geral&quot; e resumo de pagamento no recibo (PDF)</span>
+              <span className="mt-1 block text-xs text-muted-foreground">
+                Desative só se o documento não puder exibir o valor fechado (o padrão é mostrar;
+                as peças e serviços continuam discriminados com subtotais em qualquer caso).
+              </span>
+            </span>
+          </label>
         </div>
 
         {error ? (
@@ -325,128 +485,6 @@ export function ReceiptLinesEditor({
           </Button>
         </div>
       </Card>
-    </div>
-  );
-}
-
-function LineRow({
-  index,
-  line,
-  onChange,
-  onRemove,
-}: {
-  index: number;
-  line: DraftLine;
-  onChange: (next: DraftLine) => void;
-  onRemove: () => void;
-}) {
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  useEffect(() => {
-    const q = line.description.trim();
-    if (q.length < 2) {
-      setSuggestions([]);
-      return;
-    }
-    const t = window.setTimeout(() => {
-      void suggestParts(q).then(setSuggestions).catch(() => setSuggestions([]));
-    }, 350);
-    return () => window.clearTimeout(t);
-  }, [line.description]);
-
-  const unitCents = parseMoneyToCents(line.unitMoney);
-  const qty = Number.parseInt(line.qty, 10);
-  const lineTotal =
-    unitCents !== null && Number.isFinite(qty) && qty > 0 ? unitCents * qty : 0;
-
-  return (
-    <div className="rounded-xl border border-border/80 bg-muted/15 p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Item {index + 1}
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-8 gap-1 text-destructive hover:bg-destructive/10 hover:text-destructive"
-          onClick={onRemove}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-          Remover
-        </Button>
-      </div>
-
-      <div className="mb-3">
-        <Label className="mb-2 block text-xs text-muted-foreground">
-          É peça ou serviço?
-        </Label>
-        <div className="grid grid-cols-2 gap-2">
-          <Button
-            type="button"
-            variant={line.kind === ReceiptLineKind.PRODUCT ? "default" : "outline"}
-            className="h-12 w-full touch-manipulation text-sm font-medium"
-            onClick={() => onChange({ ...line, kind: ReceiptLineKind.PRODUCT })}
-          >
-            Peça
-          </Button>
-          <Button
-            type="button"
-            variant={line.kind === ReceiptLineKind.SERVICE ? "default" : "outline"}
-            className="h-12 w-full touch-manipulation text-sm font-medium"
-            onClick={() => onChange({ ...line, kind: ReceiptLineKind.SERVICE })}
-          >
-            Serviço
-          </Button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-12">
-        <div className="sm:col-span-6">
-          <Label htmlFor={`d-${line.clientId}`}>Peça / serviço</Label>
-          <Input
-            id={`d-${line.clientId}`}
-            value={line.description}
-            onChange={(e) => onChange({ ...line, description: e.target.value })}
-            list={`suggestions-${line.clientId}`}
-            placeholder={
-              line.kind === ReceiptLineKind.SERVICE
-                ? "Ex.: Mão de obra, alinhamento…"
-                : "Ex.: Kit pastilha dianteira"
-            }
-          />
-          <datalist id={`suggestions-${line.clientId}`}>
-            {suggestions.map((s) => (
-              <option key={s} value={s} />
-            ))}
-          </datalist>
-        </div>
-        <div className="sm:col-span-3">
-          <Label htmlFor={`u-${line.clientId}`}>Valor unitário (R$)</Label>
-          <Input
-            id={`u-${line.clientId}`}
-            inputMode="decimal"
-            value={line.unitMoney}
-            onChange={(e) => onChange({ ...line, unitMoney: e.target.value })}
-            placeholder="115,00"
-          />
-        </div>
-        <div className="sm:col-span-2">
-          <Label htmlFor={`q-${line.clientId}`}>Quantidade</Label>
-          <Input
-            id={`q-${line.clientId}`}
-            inputMode="numeric"
-            value={line.qty}
-            onChange={(e) => onChange({ ...line, qty: e.target.value })}
-            placeholder="1"
-          />
-        </div>
-        <div className="sm:col-span-1">
-          <Label>Total</Label>
-          <div className="flex h-11 items-center rounded-md border border-input bg-muted/30 px-3 py-2 text-base tabular-nums text-foreground shadow-sm md:text-sm">
-            {formatCentsBRL(lineTotal)}
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
