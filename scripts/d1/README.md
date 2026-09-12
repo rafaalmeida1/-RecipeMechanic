@@ -103,6 +103,21 @@ Já não são precisos e podem ser removidos:
 - `POSTGRES_URL` e `CLOUDFLARE_STAGING_DATABASE_ID` do `.env`
 - a linha `d1:generate-pg-client` e os scripts `d1:export`/`d1:import`/`d1:verify`
 
+## Build na Vercel
+
+O Build Command tem de ser `prisma generate && next build` — o que está no
+`package.json`. Se tiver um `prisma migrate deploy` à frente (como tinha
+enquanto a base era Postgres), o build falha com:
+
+```
+error: Error validating datasource `db`: the URL must start with the protocol `file:`.
+```
+
+O Prisma Migrate não fala com o D1, por isso esse comando não tem lugar aqui: as
+migrações aplicam-se com `wrangler`, como está na secção seguinte. O erro
+aponta para a `DATABASE_URL`, mas a causa é o `migrate deploy` — o
+`prisma generate` passa mesmo com a `DATABASE_URL` antiga ainda definida.
+
 ## Alterações futuras ao schema
 
 O `prisma migrate dev` não fala com o D1. O ciclo passa a ser:
