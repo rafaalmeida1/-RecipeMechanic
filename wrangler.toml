@@ -1,0 +1,10 @@
+# A app corre em Node, não em Workers — este ficheiro existe só para o wrangler
+# saber a que base D1 aplicar as migrações (`wrangler d1 execute`).
+# O `database_id` é devolvido por `wrangler d1 create ribeirocar`.
+name = "ribeirocar"
+compatibility_date = "2026-09-11"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ribeirocar"
+database_id = "9d9df713-1e3e-4e0a-9782-9937206fa533"

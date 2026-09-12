@@ -7,6 +7,9 @@ import { formatCentsBRL } from "@/lib/money";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
+/** Recibos mais recentes carregados por veículo. Ver a nota do D1 abaixo. */
+const RECEIPTS_PER_VEHICLE = 20;
+
 export default async function CustomerHistoryPage({
   params,
 }: {
@@ -22,6 +25,10 @@ export default async function CustomerHistoryPage({
           receipts: {
             where: { status: "FINALIZED" },
             orderBy: { serviceDate: "desc" },
+            // Limitado por causa do D1: as linhas são carregadas com um
+            // `WHERE receiptId IN (...)` sobre todos os recibos do cliente, e o
+            // D1 rejeita queries com mais de 100 parâmetros ligados.
+            take: RECEIPTS_PER_VEHICLE,
             include: {
               lines: { orderBy: { sortOrder: "asc" }, take: 4 },
             },

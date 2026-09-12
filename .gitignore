@@ -31,7 +31,10 @@ yarn-error.log*
 .env
 .env*.local
 
-/scripts
+# `scripts/` fica local, excepto os scripts de migração para o D1, que têm de
+# ser versionados para a migração ser reproduzível.
+/scripts/*
+!/scripts/d1/
 /apagar_depois_de_importar_para_dentro_do_banco
 # vercel
 .vercel
@@ -42,6 +45,12 @@ next-env.d.ts
 
 # prisma
 /prisma/migrations/**/migration_lock.toml
+/src/generated
+/dev.db
+/prisma/dev.db
+
+# Dump intermédio da migração Postgres -> D1: contém dados reais de clientes.
+/.migration-data
 
 # Recibos legados (PDF/XLSX) — não versionar; manter só .gitkeep
 /apagar_depois_de_importar_para_dentro_do_banco/*

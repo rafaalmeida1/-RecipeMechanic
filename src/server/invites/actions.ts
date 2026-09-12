@@ -80,8 +80,10 @@ export async function acceptInvite(input: z.infer<typeof acceptSchema>) {
   if (!invite) return { ok: false as const, error: "Convite inválido ou expirado" };
 
   const passwordHash = await bcrypt.hash(parsed.data.password, 10);
-  await prisma.$transaction(async (tx) => {
-    await tx.user.upsert({
+  // Forma de lote: nenhuma das duas escritas depende do resultado da outra, e o
+  // D1 não suporta transações interativas.
+  await prisma.$transaction([
+    prisma.user.upsert({
       where: { email: invite.email },
       create: {
         email: invite.email,
@@ -92,12 +94,12 @@ export async function acceptInvite(input: z.infer<typeof acceptSchema>) {
         role: invite.role,
         passwordHash,
       },
-    });
-    await tx.invite.update({
+    }),
+    prisma.invite.update({
       where: { id: invite.id },
       data: { consumedAt: new Date() },
-    });
-  });
+    }),
+  ]);
 
   return { ok: true as const };
 }

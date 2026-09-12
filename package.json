@@ -7,11 +7,18 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "typecheck:scripts": "tsc --noEmit -p tsconfig.scripts.json",
     "postinstall": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:push": "prisma db push",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
+    "d1:diff": "prisma migrate diff --from-local-d1 --to-schema-datamodel prisma/schema.prisma --script",
+    "d1:apply": "wrangler d1 execute ribeirocar --remote --file",
+    "d1:apply:local": "wrangler d1 execute ribeirocar --local --file",
+    "d1:generate-pg-client": "prisma generate --schema prisma-postgres/schema.prisma",
+    "d1:export": "tsx scripts/d1/export-postgres.ts",
+    "d1:import": "tsx scripts/d1/import-d1.ts",
+    "d1:verify": "tsx scripts/d1/verify-migration.ts",
     "import:receipts": "tsx scripts/import-legacy-receipts.ts",
     "test": "pnpm run test:vitest && pnpm run test:jest",
     "test:vitest": "vitest run",
@@ -20,6 +27,7 @@
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.7.4",
+    "@prisma/adapter-d1": "6.19.3",
     "@prisma/client": "^6.5.0",
     "@radix-ui/react-dialog": "^1.1.6",
     "@radix-ui/react-label": "^2.1.2",
@@ -44,6 +52,7 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260910.1",
     "@eslint/eslintrc": "^3",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -71,6 +80,7 @@
     "typescript": "^5",
     "vite": "5.4.21",
     "vitest": "^2.1.9",
+    "wrangler": "^4.131.0",
     "xlsx": "^0.18.5"
   }
 }

@@ -7,6 +7,8 @@ import { Prisma } from "@prisma/client";
 import { sendHtmlEmail, smtpErrorToUserMessage } from "@/lib/mail";
 import { renderFinalizedReceiptPdfBuffer } from "@/lib/pdf/render-receipt-pdf-server";
 import { normalizePlate } from "@/lib/plate";
+import { chunkForD1, RECEIPT_LINE_INSERT_COLUMNS } from "@/lib/d1";
+import { foldForSearch } from "@/lib/search";
 import { z } from "zod";
 import { ReceiptLineKind, ReceiptPaymentMethod, ReceiptPdfTheme } from "@prisma/client";
 import { setReceiptPdfTheme as applyReceiptPdfTheme } from "./set-receipt-pdf-theme";
@@ -124,64 +126,70 @@ export async function createReceiptDraft(input: z.infer<typeof step2Schema>) {
       ? kmParsed
       : null;
 
-  const receipt = await prisma.$transaction(async (tx) => {
-    let vehicle = await tx.vehicle.findUnique({
-      where: { plateNormalized: plate },
+  // Sequencial, sem transação: o D1 não as suporta e o caminho depende de uma
+  // leitura (o veículo existe ou não), logo também não cabe num batch.
+  let vehicle = await prisma.vehicle.findUnique({
+    where: { plateNormalized: plate },
+    include: { customer: true },
+  });
+
+  if (!vehicle) {
+    const customer = await prisma.customer.create({
+      data: {
+        name: data.customerName,
+        nameFolded: foldForSearch(data.customerName),
+        email: data.customerEmail || null,
+        phone: data.customerPhone || null,
+      },
+    });
+    vehicle = await prisma.vehicle.create({
+      data: {
+        plateNormalized: plate,
+        label: data.vehicleLabel,
+        labelFolded: foldForSearch(data.vehicleLabel),
+        year,
+        customerId: customer.id,
+      },
       include: { customer: true },
     });
-
-    if (!vehicle) {
-      const customer = await tx.customer.create({
-        data: {
-          name: data.customerName,
-          email: data.customerEmail || null,
-          phone: data.customerPhone || null,
-        },
-      });
-      vehicle = await tx.vehicle.create({
-        data: {
-          plateNormalized: plate,
-          label: data.vehicleLabel,
-          year,
-          customerId: customer.id,
-        },
-        include: { customer: true },
-      });
-    } else {
-      await tx.customer.update({
+  } else {
+    await prisma.$transaction([
+      prisma.customer.update({
         where: { id: vehicle.customerId },
         data: {
           name: data.customerName,
+          nameFolded: foldForSearch(data.customerName),
           email: data.customerEmail || null,
           phone: data.customerPhone || null,
         },
-      });
-      await tx.vehicle.update({
+      }),
+      prisma.vehicle.update({
         where: { id: vehicle.id },
         data: {
           label: data.vehicleLabel,
+          labelFolded: foldForSearch(data.vehicleLabel),
           year,
         },
-      });
-      vehicle = await tx.vehicle.findUniqueOrThrow({
-        where: { id: vehicle.id },
-        include: { customer: true },
-      });
-    }
-
-    return tx.receipt.create({
-      data: {
-        vehicleId: vehicle.id,
-        km,
-        serviceDate,
-        pixKey: data.pixKey,
-        customerNameSnap: data.customerName,
-        customerEmail: data.customerEmail || null,
-        customerPhone: data.customerPhone || null,
-        status: "DRAFT",
-        ...(data.clientDraftKey ? { clientDraftKey: data.clientDraftKey } : {}),
-      },
+      }),
+    ]);
+    vehicle = await prisma.vehicle.findUniqueOrThrow({
+      where: { id: vehicle.id },
+      include: { customer: true },
     });
+  }
+
+  const receipt = await prisma.receipt.create({
+    data: {
+      vehicleId: vehicle.id,
+      km,
+      serviceDate,
+      pixKey: data.pixKey,
+      customerNameSnap: data.customerName,
+      customerEmail: data.customerEmail || null,
+      customerPhone: data.customerPhone || null,
+      status: "DRAFT",
+      ...(data.clientDraftKey ? { clientDraftKey: data.clientDraftKey } : {}),
+    },
   });
 
   revalidatePath("/receipts");
@@ -236,22 +244,23 @@ export async function saveReceiptDraft(input: z.infer<typeof draftSchema>) {
 
   const totalCents = computedLines.reduce((s, l) => s + l.lineTotalCents, 0);
 
-  await prisma.$transaction(async (tx) => {
-    await tx.receiptLine.deleteMany({ where: { receiptId } });
-    if (computedLines.length) {
-      await tx.receiptLine.createMany({
-        data: computedLines.map((l) => ({
+  await prisma.$transaction([
+    prisma.receiptLine.deleteMany({ where: { receiptId } }),
+    ...chunkForD1(computedLines, RECEIPT_LINE_INSERT_COLUMNS).map((chunk) =>
+      prisma.receiptLine.createMany({
+        data: chunk.map((l) => ({
           receiptId,
           kind: l.kind,
           description: l.description,
+          descriptionFolded: foldForSearch(l.description),
           qty: l.qty,
           unitCents: l.unitCents,
           lineTotalCents: l.lineTotalCents,
           sortOrder: l.sortOrder,
         })),
-      });
-    }
-    await tx.receipt.update({
+      }),
+    ),
+    prisma.receipt.update({
       where: { id: receiptId },
       data: {
         totalCents,
@@ -277,8 +286,8 @@ export async function saveReceiptDraft(input: z.infer<typeof draftSchema>) {
           ? { clientPaidForParts: rest.clientPaidForParts }
           : {}),
       },
-    });
-  });
+    }),
+  ]);
 
   return { ok: true as const, totalCents };
 }
@@ -339,65 +348,67 @@ export async function updateFinalizedReceipt(input: z.infer<typeof updateFinaliz
     return { ok: false as const, error: "Deve haver ao menos uma peça ou serviço" };
   }
 
-  try {
-    await prisma.$transaction(async (tx) => {
-      const receipt = await tx.receipt.findUnique({
-        where: { id: data.receiptId },
-        include: { vehicle: { include: { customer: true } } },
-      });
-      if (!receipt || receipt.status !== "FINALIZED") {
-        throw new Error("NOT_FOUND");
-      }
+  // A guarda passa a correr fora do lote: o D1 não tem transações interativas,
+  // logo não há como ler e decidir a meio de uma. Já era a primeira instrução do
+  // bloco antigo, por isso continua a barrar antes de qualquer escrita.
+  const receipt = await prisma.receipt.findUnique({
+    where: { id: data.receiptId },
+    include: { vehicle: { include: { customer: true } } },
+  });
+  if (!receipt || receipt.status !== "FINALIZED") {
+    return { ok: false as const, error: "Recibo não encontrado" };
+  }
 
-      await tx.receiptLine.deleteMany({ where: { receiptId: data.receiptId } });
-      await tx.receiptLine.createMany({
-        data: computedLines.map((l) => ({
+  await prisma.$transaction([
+    prisma.receiptLine.deleteMany({ where: { receiptId: data.receiptId } }),
+    ...chunkForD1(computedLines, RECEIPT_LINE_INSERT_COLUMNS).map((chunk) =>
+      prisma.receiptLine.createMany({
+        data: chunk.map((l) => ({
           receiptId: data.receiptId,
           kind: l.kind,
           description: l.description,
+          descriptionFolded: foldForSearch(l.description),
           qty: l.qty,
           unitCents: l.unitCents,
           lineTotalCents: l.lineTotalCents,
           sortOrder: l.sortOrder,
         })),
-      });
-
-      await tx.customer.update({
-        where: { id: receipt.vehicle.customerId },
-        data: {
-          name: data.customerNameSnap,
-          email: data.customerEmail || null,
-          phone: data.customerPhone || null,
-        },
-      });
-      await tx.vehicle.update({
-        where: { id: receipt.vehicleId },
-        data: { label: data.vehicleLabel, year },
-      });
-
-      await tx.receipt.update({
-        where: { id: data.receiptId },
-        data: {
-          totalCents,
-          serviceDate,
-          km: data.km ?? null,
-          pixKey: data.pixKey,
-          customerNameSnap: data.customerNameSnap,
-          customerEmail: data.customerEmail || null,
-          customerPhone: data.customerPhone || null,
-          receiptNote: data.receiptNote?.trim() || null,
-          showGrandTotalOnPdf: data.showGrandTotalOnPdf,
-          clientPaidForParts: data.clientPaidForParts,
-          ...pay,
-        },
-      });
-    });
-  } catch (e) {
-    if (e instanceof Error && e.message === "NOT_FOUND") {
-      return { ok: false as const, error: "Recibo não encontrado" };
-    }
-    throw e;
-  }
+      }),
+    ),
+    prisma.customer.update({
+      where: { id: receipt.vehicle.customerId },
+      data: {
+        name: data.customerNameSnap,
+        nameFolded: foldForSearch(data.customerNameSnap),
+        email: data.customerEmail || null,
+        phone: data.customerPhone || null,
+      },
+    }),
+    prisma.vehicle.update({
+      where: { id: receipt.vehicleId },
+      data: {
+        label: data.vehicleLabel,
+        labelFolded: foldForSearch(data.vehicleLabel),
+        year,
+      },
+    }),
+    prisma.receipt.update({
+      where: { id: data.receiptId },
+      data: {
+        totalCents,
+        serviceDate,
+        km: data.km ?? null,
+        pixKey: data.pixKey,
+        customerNameSnap: data.customerNameSnap,
+        customerEmail: data.customerEmail || null,
+        customerPhone: data.customerPhone || null,
+        receiptNote: data.receiptNote?.trim() || null,
+        showGrandTotalOnPdf: data.showGrandTotalOnPdf,
+        clientPaidForParts: data.clientPaidForParts,
+        ...pay,
+      },
+    }),
+  ]);
 
   revalidatePath(`/receipts/${data.receiptId}`);
   revalidatePath(`/receipts/${data.receiptId}/edit`);
@@ -508,14 +519,14 @@ export async function suggestParts(query: string) {
   const q = query.trim();
   if (q.length < 2) return [] as string[];
   const safe = q.replace(/[%_]/g, "");
-  const pattern = `%${safe}%`;
+  const pattern = `%${foldForSearch(safe)}%`;
   const rows = await prisma.$queryRaw<{ description: string }[]>(
     Prisma.sql`
       SELECT rl.description AS description
       FROM "ReceiptLine" rl
       INNER JOIN "Receipt" r ON r.id = rl."receiptId"
       WHERE r.status = 'FINALIZED'
-        AND rl.description ILIKE ${pattern}
+        AND rl."descriptionFolded" LIKE ${pattern}
       GROUP BY rl.description
       ORDER BY COUNT(*) DESC
       LIMIT 12
@@ -532,15 +543,15 @@ export async function searchClients(query: string) {
   const customers = await prisma.customer.findMany({
     where: {
       OR: [
-        { name: { contains: q, mode: "insensitive" } },
-        { phone: { contains: q, mode: "insensitive" } },
-        { email: { contains: q, mode: "insensitive" } },
+        { nameFolded: { contains: foldForSearch(q) } },
+        { phone: { contains: q } },
+        { email: { contains: q } },
         {
           vehicles: {
             some: {
               OR: [
-                { plateNormalized: { contains: plate, mode: "insensitive" } },
-                { label: { contains: q, mode: "insensitive" } },
+                { plateNormalized: { contains: plate } },
+                { labelFolded: { contains: foldForSearch(q) } },
               ],
             },
           },

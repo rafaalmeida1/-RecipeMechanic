@@ -9,6 +9,7 @@ import {
 } from "@prisma/client";
 import { normalizePlate } from "@/lib/plate";
 import type { WizardSyncPayload, BundleLine } from "@/lib/offline/outbox";
+import { foldForSearch } from "@/lib/search";
 
 export type OfflineReceiptForPdf = Receipt & {
   lines: ReceiptLine[];
@@ -44,6 +45,7 @@ export function buildOfflineReceiptPdfModel(
       receiptId: draftKey,
       kind: l.kind,
       description: l.description,
+      descriptionFolded: foldForSearch(l.description),
       qty: l.qty,
       unitCents: l.unitCents,
       lineTotalCents,
@@ -56,6 +58,7 @@ export function buildOfflineReceiptPdfModel(
   const customer: Customer = {
     id: "offline-customer",
     name: wizard.customerName,
+    nameFolded: foldForSearch(wizard.customerName),
     email: wizard.customerEmail || null,
     phone: wizard.customerPhone || null,
     notes: null,
@@ -67,6 +70,7 @@ export function buildOfflineReceiptPdfModel(
     id: "offline-vehicle",
     plateNormalized: plate,
     label: wizard.vehicleLabel,
+    labelFolded: foldForSearch(wizard.vehicleLabel),
     year,
     customerId: customer.id,
     customer,

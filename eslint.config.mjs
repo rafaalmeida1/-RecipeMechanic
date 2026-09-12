@@ -10,6 +10,11 @@ const compat = new FlatCompat({
 });
 
 const eslintConfig = [
+  // Artefactos de build e clientes Prisma gerados — código de máquina, não
+  // vale a pena analisar.
+  {
+    ignores: [".next/**", "out/**", "next-env.d.ts", "src/generated/**"],
+  },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
 ];
 

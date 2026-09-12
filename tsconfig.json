@@ -23,5 +23,9 @@
     "**/*.tsx",
     ".next/types/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  // `scripts/` é ferramenta de migração, corrida à mão com tsx. Fica fora do
+  // build para este não depender do cliente Prisma do Postgres, que é gerado
+  // localmente e não vai para o repositório. Verifica-se com `pnpm run
+  // typecheck:scripts`.
+  "exclude": ["node_modules", "scripts"]
 }

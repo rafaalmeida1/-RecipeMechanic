@@ -2,8 +2,11 @@ generator client {
   provider = "prisma-client-js"
 }
 
+/// Cloudflare D1 fala SQLite. Em runtime a ligação vem do driver adapter
+/// (`PrismaD1` em `src/lib/db.ts`), não desta `url` — ela serve apenas ao CLI do
+/// Prisma para gerar migrações (`prisma migrate diff`) e para o D1 local.
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -36,28 +39,28 @@ enum ReceiptPaymentMethod {
 }
 
 model BusinessProfile {
-  id           String   @id @default(cuid())
-  legalName    String
-  cnpj         String
-  phone        String
-  email        String
-  pixDefault   String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id         String   @id @default(cuid())
+  legalName  String
+  cnpj       String
+  phone      String
+  email      String
+  pixDefault String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 model User {
-  id             String    @id @default(cuid())
+  id             String               @id @default(cuid())
   name           String?
-  email          String    @unique
+  email          String               @unique
   emailVerified  DateTime?
   image          String?
   passwordHash   String?
-  role             Role     @default(MECHANIC)
-  accounts         Account[]
-  sessions         Session[]
-  passwordResets   PasswordResetToken[]
-  invitesCreated   Invite[] @relation("InviteCreatedBy")
+  role           Role                 @default(MECHANIC)
+  accounts       Account[]
+  sessions       Session[]
+  passwordResets PasswordResetToken[]
+  invitesCreated Invite[]             @relation("InviteCreatedBy")
 }
 
 model Account {
@@ -66,12 +69,12 @@ model Account {
   type              String
   provider          String
   providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
+  refresh_token     String?
+  access_token      String?
   expires_at        Int?
   token_type        String?
   scope             String?
-  id_token          String? @db.Text
+  id_token          String?
   session_state     String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -108,20 +111,27 @@ model PasswordResetToken {
 }
 
 model Customer {
-  id        String   @id @default(cuid())
-  name      String
-  phone     String?
-  email     String?
-  notes     String?  @db.Text
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  vehicles  Vehicle[]
+  id         String    @id @default(cuid())
+  name       String
+  /// `name` em minusculas (Unicode). Existe porque o SQLite do D1 nao
+  /// sabe ignorar maiusculas em caracteres acentuados. Ver `src/lib/search.ts`.
+  nameFolded String
+  phone      String?
+  email      String?
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  vehicles   Vehicle[]
+
+  @@index([nameFolded])
 }
 
 model Vehicle {
   id              String    @id @default(cuid())
   plateNormalized String    @unique
   label           String
+  /// `label` em minusculas (Unicode) - ver `Customer.nameFolded`.
+  labelFolded     String
   year            Int?
   customerId      String
   customer        Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -133,36 +143,36 @@ model Vehicle {
 }
 
 model Receipt {
-  id               String         @id @default(cuid())
+  id                   String               @id @default(cuid())
   /// Chave idempotente p/ importação legada (ex.: hash semântico). `null` = recibo normal do app.
-  importSourceKey  String?        @unique
+  importSourceKey      String?              @unique
   /// UUID gerado no cliente p/ criar o mesmo rascunho uma vez ao sincronizar após offline.
-  clientDraftKey   String?        @unique
-  status           ReceiptStatus  @default(DRAFT)
-  vehicleId        String
-  vehicle          Vehicle        @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-  km               Int?
-  serviceDate      DateTime
-  pixKey           String
-  customerNameSnap String?
-  customerEmail    String?
-  customerPhone    String?
-  totalCents       Int              @default(0)
-  pdfTheme         ReceiptPdfTheme  @default(LIGHT)
+  clientDraftKey       String?              @unique
+  status               ReceiptStatus        @default(DRAFT)
+  vehicleId            String
+  vehicle              Vehicle              @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  km                   Int?
+  serviceDate          DateTime
+  pixKey               String
+  customerNameSnap     String?
+  customerEmail        String?
+  customerPhone        String?
+  totalCents           Int                  @default(0)
+  pdfTheme             ReceiptPdfTheme      @default(LIGHT)
   /// Texto livre no PDF (por baixo dos itens), opcional.
-  receiptNote      String?          @db.Text
-  paymentMethod    ReceiptPaymentMethod @default(PIX)
+  receiptNote          String?
+  paymentMethod        ReceiptPaymentMethod @default(PIX)
   /// Parcelas no cartão (1 = à vista). Ignorado se `paymentMethod` ≠ CARTAO.
   cardInstallmentCount Int?
   /// Se falso, o PDF omite o bloco "Total geral" e o resumo de pagamento; subtotais por bloco mantêm-se.
-  showGrandTotalOnPdf Boolean       @default(true)
+  showGrandTotalOnPdf  Boolean              @default(true)
   /// Se verdade, o cliente já quitou as peças — o total a pagar/parcelas no recibo usam só mão de obra (serviços).
-  clientPaidForParts Boolean         @default(false)
-  finalizedAt      DateTime?
-  emailSentAt      DateTime?
-  lines            ReceiptLine[]
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  clientPaidForParts   Boolean              @default(false)
+  finalizedAt          DateTime?
+  emailSentAt          DateTime?
+  lines                ReceiptLine[]
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
 
   @@index([vehicleId])
   @@index([status])
@@ -170,31 +180,33 @@ model Receipt {
 }
 
 model ReceiptLine {
-  id             String          @id @default(cuid())
-  receiptId      String
-  receipt        Receipt         @relation(fields: [receiptId], references: [id], onDelete: Cascade)
-  kind           ReceiptLineKind @default(PRODUCT)
-  description    String
-  qty            Int
-  unitCents      Int
-  lineTotalCents Int
-  sortOrder      Int             @default(0)
+  id                String          @id @default(cuid())
+  receiptId         String
+  receipt           Receipt         @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  kind              ReceiptLineKind @default(PRODUCT)
+  description       String
+  /// `description` em minusculas (Unicode) - ver `Customer.nameFolded`.
+  descriptionFolded String
+  qty               Int
+  unitCents         Int
+  lineTotalCents    Int
+  sortOrder         Int             @default(0)
 
   @@index([receiptId])
-  @@index([description])
+  @@index([descriptionFolded])
 }
 
 /// Admin-created invite for a new email (optional allowlist flow)
 model Invite {
-  id         String   @id @default(cuid())
-  email      String
-  role       Role
-  tokenHash  String   @unique
-  expiresAt  DateTime
-  consumedAt DateTime?
+  id          String    @id @default(cuid())
+  email       String
+  role        Role
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  consumedAt  DateTime?
   createdById String
-  createdBy   User     @relation("InviteCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
-  createdAt  DateTime @default(now())
+  createdBy   User      @relation("InviteCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
 
   @@index([email])
 }
